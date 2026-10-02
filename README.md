@@ -14,16 +14,12 @@ an existing EKS cluster, with no way to exceed the limits it was given.
 **Proven on a live cluster:** `make verify` → **60 passed, 0 failed, 0 warnings**
 ([log](evidence/07-verify-60-of-60-passed.log)).
 
-![As built on EKS](docs/images/eks-as-built.png)
-
-<details>
-<summary>Target architecture (both clouds)</summary>
-
 ![Multi Cloud Governed SRE Agent Architecture](docs/images/architecture-multicloud.png)
 
 This repo implements the **AWS / Amazon EKS** half. The GKE half (Vertex AI, Workload Identity
 Federation) is next. Coverage against the diagram: [docs/coverage.md](docs/coverage.md).
-</details>
+
+![As built on EKS](docs/images/eks-as-built.png)
 
 ## The problem
 
