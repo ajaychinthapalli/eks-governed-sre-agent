@@ -1,0 +1,30 @@
+# Governance demo: a workload that leaks a credential into its logs.
+# When the agent reads these logs, the log text becomes part of the next LLM
+# prompt, and agentgateway's secret guard rejects the request (HTTP 403) before
+# it reaches Bedrock.
+#
+# AKIAIOSFODNN7EXAMPLE is AWS's published documentation example key; it is not real.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: legacy-billing
+  namespace: shop-demo
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: legacy-billing } }
+  template:
+    metadata: { labels: { app: legacy-billing } }
+    spec:
+      containers:
+        - name: billing
+          image: public.ecr.aws/docker/library/busybox:1.36
+          command: ["sh", "-c"]
+          args:
+            - |
+              echo "legacy-billing starting"
+              echo "DEBUG using aws_access_key_id=AKIAIOSFODNN7EXAMPLE"
+              echo "ERROR could not reach s3://billing-exports: AccessDenied" >&2
+              exit 1
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 32Mi }

@@ -1,0 +1,42 @@
+bash-5.3$ kubectl get pods -n kagent -w
+NAME                                 READY   STATUS             RESTARTS      AGE
+kagent-controller-7d74f6bfcd-vlv9g   0/1     CrashLoopBackOff   5 (47s ago)   3m33s
+kagent-postgresql-65d89899bf-9ppks   0/1     Pending            0             3m33s
+kagent-ui-6c45557d94-btc5m           1/1     Running            0             3m33s
+^Z
+[1]+  Stopped                    kubectl get pods -n kagent -w
+bash-5.3$ 
+bash-5.3$ kubectl get pods -n kagent
+NAME                                 READY   STATUS             RESTARTS      AGE
+kagent-controller-7d74f6bfcd-vlv9g   0/1     CrashLoopBackOff   5 (90s ago)   4m16s
+kagent-postgresql-65d89899bf-9ppks   0/1     Pending            0             4m16s
+kagent-ui-6c45557d94-btc5m           1/1     Running            0             4m16s
+bash-5.3$ 
+bash-5.3$ kubectl get events -n kagent --sort-by=.lastTimestamp | tail -20
+4m31s       Normal    ScalingReplicaSet   deployment/kagent-ui                      Scaled up replica set kagent-ui-6c45557d94 from 0 to 1
+4m31s       Normal    SuccessfulCreate    replicaset/kagent-ui-6c45557d94           Created pod: kagent-ui-6c45557d94-btc5m
+4m31s       Normal    Scheduled           pod/kagent-controller-7d74f6bfcd-vlv9g    Successfully assigned kagent/kagent-controller-7d74f6bfcd-vlv9g to ip-192-168-144-126.us-east-2.compute.internal
+4m31s       Normal    SuccessfulCreate    replicaset/kagent-controller-7d74f6bfcd   Created pod: kagent-controller-7d74f6bfcd-vlv9g
+4m31s       Normal    ScalingReplicaSet   deployment/kagent-controller              Scaled up replica set kagent-controller-7d74f6bfcd from 0 to 1
+4m31s       Warning   FailedScheduling    pod/kagent-postgresql-65d89899bf-9ppks    0/3 nodes are available: pod has unbound immediate PersistentVolumeClaims. not found
+4m31s       Normal    SuccessfulCreate    replicaset/kagent-postgresql-65d89899bf   Created pod: kagent-postgresql-65d89899bf-9ppks
+4m31s       Normal    Scheduled           pod/kagent-ui-6c45557d94-btc5m            Successfully assigned kagent/kagent-ui-6c45557d94-btc5m to ip-192-168-233-47.us-east-2.compute.internal
+4m30s       Normal    Pulling             pod/kagent-controller-7d74f6bfcd-vlv9g    Pulling image "ghcr.io/kagent-dev/kagent/controller:0.10.1"
+4m30s       Normal    Pulling             pod/kagent-ui-6c45557d94-btc5m            Pulling image "ghcr.io/kagent-dev/kagent/ui:0.10.1"
+4m28s       Normal    Pulled              pod/kagent-controller-7d74f6bfcd-vlv9g    Successfully pulled image "ghcr.io/kagent-dev/kagent/controller:0.10.1" in 2.027s (2.027s including waiting). Image size: 42018630 bytes.
+4m24s       Normal    Pulled              pod/kagent-ui-6c45557d94-btc5m            Successfully pulled image "ghcr.io/kagent-dev/kagent/ui:0.10.1" in 5.359s (5.359s including waiting). Image size: 98609033 bytes.
+4m24s       Normal    Created             pod/kagent-ui-6c45557d94-btc5m            Container created
+4m24s       Normal    Started             pod/kagent-ui-6c45557d94-btc5m            Container started
+4m23s       Warning   Unhealthy           pod/kagent-ui-6c45557d94-btc5m            Startup probe failed: Get "http://192.168.208.51:8080/health": dial tcp 192.168.208.51:8080: connect: connection refused
+105s        Normal    Pulled              pod/kagent-controller-7d74f6bfcd-vlv9g    Container image "ghcr.io/kagent-dev/kagent/controller:0.10.1" already present on machine and can be accessed by the pod
+105s        Normal    Started             pod/kagent-controller-7d74f6bfcd-vlv9g    Container started
+105s        Normal    Created             pod/kagent-controller-7d74f6bfcd-vlv9g    Container created
+27s         Warning   BackOff             pod/kagent-controller-7d74f6bfcd-vlv9g    Back-off restarting failed container controller in pod kagent-controller-7d74f6bfcd-vlv9g_kagent(769ea1b9-b83a-4a01-9721-dbb49b2cfb8b)
+14s         Normal    FailedBinding       persistentvolumeclaim/kagent-postgresql   no persistent volumes available for this claim and no storage class is set
+bash-5.3$ 
+bash-5.3$ kubectl logs -n kagent deploy/kagent-controller --tail=40
+{"level":"info","ts":"2026-10-02T06:17:21Z","logger":"setup","msg":"Starting KAgent Controller","version":"0.10.1","git_commit":"a3d26ea","build_date":"2026-09-08","config":{"Metrics":{"Addr":"0","CertPath":"","CertName":"tls.crt","CertKey":"tls.key"},"Webhook":{"CertPath":"","CertName":"tls.crt","CertKey":"tls.key"},"Proxy":{"URL":""},"Auth":{"Mode":"unsecure","UserIDClaim":"sub"},"LeaderElection":false,"ProbeAddr":":8082","SecureMetrics":true,"EnableHTTP2":false,"DefaultModelConfig":{"Namespace":"kagent","Name":"default-model-config"},"HttpServerAddr":":8083","WatchNamespaces":"","A2ABaseUrl":"http://kagent-controller.kagent.svc:8083","MCPEgressPlaintext":false,"ToolRefreshInterval":60000000000,"Database":{"Url":"postgres://kagent:kagent@kagent-postgresql.kagent.svc:5432/kagent?sslmode=disable","UrlFile":"","VectorEnabled":false,"SkipMigrations":false,"MaxConns":0,"MinConns":-1,"MaxConnIdleTime":0,"MaxConnLifetime":0,"SessionRetentionDays":30},"Substrate":{"AteAPIEndpoint":"","AteAPITokenFile":"","AtenetRouterURL":"","Insecure":false,"DialTimeout":10000000000,"CallTimeout":30000000000,"DefaultWorkerPoolNamespace":"kagent","DefaultWorkerPoolName":"","PauseImage":"gcr.io/gke-release/pause@sha256:bcbd57ba5653580ec647b16d8163cdd1112df3609129b01f912a8032e48265da"}}}
+{"level":"info","ts":"2026-10-02T06:17:21Z","logger":"setup","msg":"Watching all namespaces (no valid namespaces specified)"}
+{"level":"info","ts":"2026-10-02T06:17:21Z","logger":"setup","msg":"running database migrations"}
+{"level":"error","ts":"2026-10-02T06:17:21Z","logger":"setup","msg":"database migration failed","error":"core migrations: create migration driver for core: failed to connect to `user=kagent database=kagent`: 10.100.112.174:5432 (kagent-postgresql.kagent.svc): dial error: dial tcp 10.100.112.174:5432: connect: connection refused","stacktrace":"github.com/kagent-dev/kagent/go/core/pkg/app.Start\n\t/workspace/core/pkg/app/app.go:549\nmain.main\n\t/workspace/core/cmd/controller/main.go:34\nruntime.main\n\t/usr/lib/go/src/runtime/proc.go:302"}
+bash-5.3$ 

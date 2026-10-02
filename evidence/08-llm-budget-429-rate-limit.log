@@ -1,0 +1,11 @@
+# kagent UI, sre-triage-agent, first triage question:
+LLM error: STREAM_ERROR POST "http://agentgateway-proxy.agentgateway-system.svc.cluster.local/v1/chat/completions": 429 Too Many Requests
+
+# Who returned the 429? The gateway's own budget (reason RateLimit), not Bedrock:
+kubectl logs -n agentgateway-system -l gateway.networking.k8s.io/gateway-name=agentgateway-proxy --tail=500 \
+  | grep '"http.status":429' | grep -oE '"(reason|error)":"[^"]*"' | sort | uniq -c
+Defaulted container "agentgateway" out of: agentgateway, opentelemetry-auto-instrumentation-java (init), opentelemetry-auto-instrumentation-nodejs (init), opentelemetry-auto-instrumentation-python (init), opentelemetry-auto-instrumentation-dotnet (init)
+Defaulted container "agentgateway" out of: agentgateway, opentelemetry-auto-instrumentation-java (init), opentelemetry-auto-instrumentation-nodejs (init), opentelemetry-auto-instrumentation-python (init), opentelemetry-auto-instrumentation-dotnet (init)
+   3 "error":"rate limit exceeded"
+   3 "reason":"RateLimit"
+bash-5.3$

@@ -1,0 +1,4 @@
+# Facts read from the live environment at the last configure (reused when offline).
+# discovered VPC_CIDRS=10.0.0.0/16 100.64.0.0/16
+# discovered KUBE_API_SVC_IP=172.20.0.1
+# discovered GW_CRDS=true

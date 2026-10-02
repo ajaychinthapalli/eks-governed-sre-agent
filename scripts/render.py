@@ -1,0 +1,399 @@
+#!/usr/bin/env python3
+"""Renders one environment into deploy/<env>/ from envs/<env>.env (exported by scripts/lib.sh).
+
+    deploy/<env>/platform/   kustomize overlay: platform/base + settings + scope + egress (+ prod guardrails)
+    deploy/<env>/values/     per-environment Helm values layered over helm-values/
+    deploy/<env>/gitops/     Argo CD AppProject, root app and child apps
+
+Called by scripts/configure.sh. Pure function of its inputs: same env file, same output, so
+`make check` can prove the committed deploy/ matches envs/.
+"""
+import json
+import os
+import re
+import sys
+
+ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+E = os.environ.get
+
+
+def fail(msg):
+    print(f"  ✗ {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def flag(name, default="false"):
+    v = E(name, default).strip().lower()
+    if v not in ("true", "false"):
+        fail(f"{name} must be true or false (got '{v}')")
+    return v == "true"
+
+
+ENV_NAME = E("ENV_NAME") or fail("ENV_NAME not set")
+PROD = E("ENVIRONMENT", "") == "prod"
+REPO, REV = E("GIT_REPO_URL", ""), E("GIT_REVISION", "main")
+ARGO = E("ARGOCD_NAMESPACE", "argocd")
+MODE = E("DEPLOY_MODE", "gitops")
+DEMO = flag("DEMO_APP")
+OIDC = flag("KAGENT_OIDC")
+EXT_DB = flag("KAGENT_EXTERNAL_DB")
+EGRESS = flag("EGRESS_LOCKDOWN")
+BEDROCK_PRIVATE = flag("BEDROCK_PRIVATE_ENDPOINT")
+GW_CRDS = flag("GW_CRDS", "true")
+AUTH = E("AWS_AUTH_MODE", "pod-identity")
+NAMESPACES = E("APP_NAMESPACES", "").split()
+READONLY_NS = E("APP_NAMESPACES_READONLY", "").split()
+VPC_CIDRS = E("VPC_CIDRS", "").split()
+API_SVC_IP = E("KUBE_API_SVC_IP", "")
+OTLP = E("CENTRAL_OTLP_ENDPOINT", "")
+OTLP_CIDRS = E("CENTRAL_OTLP_CIDRS", "0.0.0.0/0").split()
+V = json.loads(E("VERSIONS_JSON", "{}"))
+DEMO_NS = E("DEMO_NAMESPACE", "shop-demo") or "shop-demo"
+PLATFORM_NS = ["agentgateway-system", "kagent", "kagent-tools", "kagent-executor", "sre-observability"]
+
+# ------------------------------------------------------------------ validation
+if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,30}", ENV_NAME):
+    fail(f"environment name '{ENV_NAME}' must be lowercase letters, digits and dashes")
+if not re.fullmatch(r"[1-9][0-9]*", E("MAX_REPLICAS", "")):
+    fail("MAX_REPLICAS must be a positive integer")
+TOKENS_PM = E("LLM_TOKENS_PER_MINUTE", "400000") or "400000"
+REQUESTS_PM = E("LLM_REQUESTS_PER_MINUTE", "120") or "120"
+for _n, _v in (("LLM_TOKENS_PER_MINUTE", TOKENS_PM), ("LLM_REQUESTS_PER_MINUTE", REQUESTS_PM)):
+    if not re.fullmatch(r"[1-9][0-9]*", _v):
+        fail(f"{_n} must be a positive integer")
+if AUTH not in ("pod-identity", "irsa"):
+    fail("AWS_AUTH_MODE must be pod-identity or irsa")
+if MODE not in ("gitops", "direct"):
+    fail("DEPLOY_MODE must be gitops or direct")
+for ns in NAMESPACES + READONLY_NS:
+    if not re.fullmatch(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?", ns) or len(ns) > 63:
+        fail(f"'{ns}' is not a valid namespace name")
+    if ns in ("kube-system", "kube-public", "kube-node-lease", "default", ARGO, *PLATFORM_NS):
+        fail(f"the agent must not be scoped to '{ns}'")
+if set(NAMESPACES) & set(READONLY_NS):
+    fail("a namespace is in both APP_NAMESPACES and APP_NAMESPACES_READONLY")
+if not NAMESPACES and not READONLY_NS:
+    fail("APP_NAMESPACES (or APP_NAMESPACES_READONLY) is empty: the agent would see nothing")
+if DEMO and not re.fullmatch(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?", DEMO_NS):
+    fail(f"DEMO_NAMESPACE '{DEMO_NS}' is not a valid namespace name")
+if DEMO and DEMO_NS not in NAMESPACES:
+    fail(f"DEMO_APP=true needs DEMO_NAMESPACE ('{DEMO_NS}') in APP_NAMESPACES")
+if EGRESS and not VPC_CIDRS:
+    fail("EGRESS_LOCKDOWN=true but the VPC CIDRs could not be discovered (see configure output)")
+
+if PROD:
+    problems = []
+    if MODE != "gitops":
+        problems.append("DEPLOY_MODE must be gitops (direct mode is for non-production only)")
+    if not re.fullmatch(r"v?\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?|[0-9a-f]{40}", REV):
+        problems.append(f"GIT_REVISION must be a release tag such as v1.2.0 or a commit SHA, not '{REV}'")
+    if DEMO:
+        problems.append("DEMO_APP must be false")
+    if not EGRESS:
+        problems.append("EGRESS_LOCKDOWN must be true")
+    if not BEDROCK_PRIVATE:
+        problems.append("BEDROCK_PRIVATE_ENDPOINT must be true (Bedrock over the VPC endpoint only)")
+    if problems:
+        fail("production rules not met:\n      - " + "\n      - ".join(problems))
+if MODE == "gitops" and not REPO:
+    fail("GIT_REPO_URL is required in gitops mode")
+
+OUT = os.path.join(ROOT, "deploy", ENV_NAME)
+REL = "../../.."  # deploy/<env>/<dir> -> repo root
+
+
+def write(rel, body):
+    path = os.path.join(OUT, rel)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as fh:
+        fh.write(body)
+
+
+def clean(rel):
+    d = os.path.join(OUT, rel)
+    if os.path.isdir(d):
+        for f in os.listdir(d):
+            os.remove(os.path.join(d, f))
+
+
+HEADER = f"# Generated by `make configure ENV={ENV_NAME}` from envs/{ENV_NAME}.env. Do not edit; edit the env file.\n"
+
+# ------------------------------------------------------------------ platform overlay
+clean("platform")
+write("platform/settings.env", HEADER + "".join(f"{k}={v}\n" for k, v in [
+    ("LLM_MODEL", E("LLM_MODEL")), ("AWS_REGION", E("AWS_REGION")), ("MAX_REPLICAS", E("MAX_REPLICAS")),
+    ("ARGOCD_CONTROLLER", f"system:serviceaccount:{ARGO}:argocd-application-controller"),
+    ("BREAKGLASS_GROUPS", E("BREAKGLASS_GROUPS", "system:masters")),
+]))
+
+scope = []
+for ns in NAMESPACES + READONLY_NS:
+    body = ""
+    if DEMO and ns == DEMO_NS:
+        body += (f"# Demo namespace (DEMO_NAMESPACE), created and owned by this repo because DEMO_APP=true.\napiVersion: v1\nkind: Namespace\n"
+                 f"metadata:\n  name: {ns}\n  labels:\n    sre-agent/scope: \"true\"\n---\n")
+    else:
+        body += f"# Existing namespace '{ns}': only the agent's RoleBindings are added; the namespace is never owned here.\n"
+    body += ("apiVersion: rbac.authorization.k8s.io/v1\nkind: RoleBinding\nmetadata:\n  name: sre-agent-read\n"
+             f"  namespace: {ns}\nroleRef:\n  apiGroup: rbac.authorization.k8s.io\n  kind: ClusterRole\n"
+             "  name: sre-agent-app-read\nsubjects:\n  - kind: ServiceAccount\n    name: kagent-tools\n"
+             "    namespace: kagent-tools\n")
+    if ns in NAMESPACES:
+        body += ("---\napiVersion: rbac.authorization.k8s.io/v1\nkind: RoleBinding\nmetadata:\n"
+                 f"  name: sre-agent-remediate\n  namespace: {ns}\nroleRef:\n  apiGroup: rbac.authorization.k8s.io\n"
+                 "  kind: ClusterRole\n  name: sre-agent-app-remediate\nsubjects:\n  - kind: ServiceAccount\n"
+                 "    name: kagent-executor\n    namespace: kagent-executor\n")
+    else:
+        body += f"# '{ns}' is in APP_NAMESPACES_READONLY: no remediation binding.\n"
+    scope.append(body)
+write("platform/app-scope.yaml", HEADER + "---\n".join(scope))
+
+
+def np(name, ns, selector, egress, comment):
+    sel = "{}" if not selector else "\n    matchLabels:\n" + "".join(f"      {k}: {v}\n" for k, v in selector.items()).rstrip("\n")
+    rules = "".join(egress)
+    return (f"# {comment}\napiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: {name}\n"
+            f"  namespace: {ns}\nspec:\n  podSelector: {sel}\n  policyTypes: [Egress]\n  egress:\n{rules}")
+
+
+def to_ns(*names, ports=None):
+    r = "    - to:\n" + "".join(
+        f"        - namespaceSelector:\n            matchLabels:\n              kubernetes.io/metadata.name: {n}\n" for n in names)
+    if ports:
+        r += "      ports:\n" + "".join(f"        - {{ protocol: TCP, port: {p} }}\n" for p in ports)
+    return r
+
+
+def to_cidrs(cidrs, ports, proto="TCP"):
+    return ("    - to:\n" + "".join(f"        - ipBlock: {{ cidr: {c} }}\n" for c in cidrs)
+            + "      ports:\n" + "".join(f"        - {{ protocol: {proto}, port: {p} }}\n" for p in ports))
+
+
+DNS = ("    - to:\n        - namespaceSelector:\n            matchLabels:\n              kubernetes.io/metadata.name: kube-system\n"
+       "          podSelector:\n            matchLabels:\n              k8s-app: kube-dns\n"
+       "      ports:\n        - { protocol: UDP, port: 53 }\n        - { protocol: TCP, port: 53 }\n")
+DNS_EXTRA = E("DNS_EXTRA_CIDRS", "").split()   # e.g. NodeLocal DNSCache 169.254.20.10/32
+if DNS_EXTRA:
+    DNS += to_cidrs(DNS_EXTRA, [53], "UDP") + to_cidrs(DNS_EXTRA, [53])
+SAME_NS = "    - to:\n        - podSelector: {}\n"
+API_CIDRS = VPC_CIDRS + ([f"{API_SVC_IP}/32"] if API_SVC_IP else [])
+API = to_cidrs(API_CIDRS, [443])   # EKS API server ENIs and interface endpoints live in the VPC
+
+egress_docs = []
+if EGRESS:
+    egress_docs.append(np("default-deny-egress", "kagent", None,
+        [DNS, API, SAME_NS, to_ns("agentgateway-system"), to_ns("sre-observability", ports=[4317, 4318])]
+        + ([to_cidrs(VPC_CIDRS, [5432])] if EXT_DB else []),
+        "kagent: DNS, Kubernetes API, itself, the gateway and the collector" + (", RDS in the VPC" if EXT_DB else "") + ". Nothing else."))
+    if OIDC:
+        egress_docs.append(np("oauth2-proxy-to-idp", "kagent", {"app.kubernetes.io/name": "oauth2-proxy"},
+            [to_cidrs(["0.0.0.0/0"], [443])], "oauth2-proxy only: HTTPS to your identity provider (KAGENT_OIDC=true)."))
+    gw = [DNS, API, SAME_NS, to_ns("kagent-tools", "kagent-executor", ports=[8084]),
+          to_ns("sre-observability", ports=[4317, 4318])]
+    if AUTH == "pod-identity":
+        gw.append(to_cidrs(["169.254.170.23/32"], [80]))
+    if not BEDROCK_PRIVATE:
+        gw.append(to_cidrs(["0.0.0.0/0"], [443]))
+    egress_docs.append(np("default-deny-egress", "agentgateway-system", None, gw,
+        "agentgateway: DNS, Kubernetes API, its control plane, the two tool servers, the collector, "
+        + ("Bedrock via the VPC endpoint (inside the VPC CIDR)" if BEDROCK_PRIVATE else "Bedrock over the internet (443)")
+        + (", and the EKS Pod Identity agent." if AUTH == "pod-identity" else ".")))
+    for ns in ("kagent-tools", "kagent-executor"):
+        egress_docs.append(np("default-deny-egress", ns, None,
+            [DNS, API, to_ns("sre-observability", ports=[4317, 4318])],
+            f"{ns}: only DNS, the Kubernetes API and the collector."))
+    egress_docs.append(np("default-deny-egress", "sre-observability", None,
+        [DNS, API, to_ns("agentgateway-system", ports=[15020])] + ([to_cidrs(OTLP_CIDRS, [443])] if OTLP else []),
+        "collector: DNS, Kubernetes API (k8sattributes), gateway metrics" + (", and the central OTLP backend." if OTLP else ".")))
+    write("platform/egress.yaml", HEADER + "---\n".join(egress_docs))
+
+if OIDC:
+    if not VPC_CIDRS:
+        fail("KAGENT_OIDC=true needs VPC_CIDRS (the internal load balancer reaches oauth2-proxy from the VPC)")
+    write("platform/oauth2-proxy-ingress.yaml", HEADER +
+        "# KAGENT_OIDC=true: the kagent namespace only accepts its own pods, so let the internal load\n"
+        "# balancer (IP targets, inside the VPC) reach oauth2-proxy on 4180. Nothing else is opened.\n"
+        "apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: oauth2-proxy-from-vpc\n"
+        "  namespace: kagent\nspec:\n  podSelector:\n    matchLabels:\n      app.kubernetes.io/name: oauth2-proxy\n"
+        "  policyTypes: [Ingress]\n  ingress:\n    - from:\n"
+        + "".join(f"        - ipBlock: {{ cidr: {c} }}\n" for c in VPC_CIDRS)
+        + "      ports:\n        - { protocol: TCP, port: 4180 }\n")
+resources = [f"{REL}/platform/base", "app-scope.yaml"] + (["egress.yaml"] if EGRESS else []) \
+    + (["oauth2-proxy-ingress.yaml"] if OIDC else [])
+components = ([f"{REL}/platform/components/prod-guardrails"] if PROD else []) + \
+             ([f"{REL}/platform/components/irsa"] if AUTH == "irsa" else [])
+irsa_arn = f"arn:aws:iam::{E('AWS_ACCOUNT_ID', '')}:role/{E('GATEWAY_IAM_ROLE_NAME', '')}"
+kust = (HEADER + "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n"
+        + "".join(f"  - {r}\n" for r in resources)
+        + ("components:\n" + "".join(f"  - {c}\n" for c in components) if components else "")
+        + "configMapGenerator:\n  - name: sre-cluster-settings\n    namespace: kagent\n    envs: [settings.env]\n"
+          "    options:\n      disableNameSuffixHash: true\n"
+        + "labels:\n  - pairs: { app.kubernetes.io/part-of: governed-sre-agent }\n    includeSelectors: false\n"
+        + "replacements:\n"
+          "  - source: { kind: ConfigMap, name: sre-cluster-settings, fieldPath: data.LLM_MODEL }\n"
+          "    targets:\n"
+          "      - select: { kind: AgentgatewayBackend, name: llm-provider }\n        fieldPaths: [spec.ai.provider.bedrock.model]\n"
+          "      - select: { kind: ModelConfig, name: governed-llm }\n        fieldPaths: [spec.model]\n"
+          "  - source: { kind: ConfigMap, name: sre-cluster-settings, fieldPath: data.AWS_REGION }\n"
+          "    targets:\n"
+          "      - select: { kind: AgentgatewayBackend, name: llm-provider }\n        fieldPaths: [spec.ai.provider.bedrock.region]\n"
+        + "patches:\n"
+          "  # LLM budget per proxy replica (LLM_TOKENS_PER_MINUTE, LLM_REQUESTS_PER_MINUTE)\n"
+          "  - target: { kind: AgentgatewayPolicy, name: llm-budget }\n"
+          "    patch: |-\n"
+          f"      - op: replace\n        path: /spec/traffic/rateLimit/local/0/tokens\n        value: {TOKENS_PM}\n"
+          f"      - op: replace\n        path: /spec/traffic/rateLimit/local/1/requests\n        value: {REQUESTS_PM}\n"
+        + (("  - target: { kind: AgentgatewayParameters, name: agentgateway-proxy-params }\n"
+            "    patch: |-\n      - op: replace\n        path: /spec/serviceAccount/metadata/annotations/eks.amazonaws.com~1role-arn\n"
+            f"        value: {irsa_arn}\n") if AUTH == "irsa" else ""))
+write("platform/kustomization.yaml", kust)
+
+# ------------------------------------------------------------------ demo overlay
+clean("demo")
+if DEMO:
+    write("demo/kustomization.yaml", HEADER +
+          "# The sample broken apps (apps/demo-shop) placed in DEMO_NAMESPACE.\n"
+          "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n"
+          f"namespace: {DEMO_NS}\nresources:\n  - {REL}/apps/demo-shop\n")
+else:
+    d = os.path.join(OUT, "demo")
+    if os.path.isdir(d):
+        os.rmdir(d)
+
+# ------------------------------------------------------------------ values
+clean("values")
+otlp_env = OTLP or "http://127.0.0.1:4318"
+exp_traces = "[otlp_http/central, debug]" if OTLP else "[debug]"
+exp_other = "[otlp_http/central]" if OTLP else "[debug]"
+write("values/otel-collector.yaml", HEADER + f"""config:
+  service:
+    pipelines:
+      traces:  {{ exporters: {exp_traces} }}
+      metrics: {{ exporters: {exp_other} }}
+      logs:    {{ exporters: {exp_other} }}
+extraEnvs:
+  - {{ name: CLOUD_PROVIDER, value: "aws" }}
+  - {{ name: CLOUD_REGION,   value: "{E('AWS_REGION')}" }}
+  - {{ name: CLUSTER_NAME,   value: "{E('CLUSTER_NAME')}" }}
+  - {{ name: ENVIRONMENT,    value: "{E('ENVIRONMENT', 'nonprod')}" }}
+  # 127.0.0.1 = placeholder while no central backend is set (pipelines then export to debug only)
+  - {{ name: CENTRAL_OTLP_ENDPOINT, value: "{otlp_env}" }}
+  - name: CENTRAL_OTLP_AUTH
+    valueFrom:
+      secretKeyRef: {{ name: central-otlp, key: authorization, optional: true }}
+""")
+write("values/kagent.yaml", HEADER + ("# production: no overrides beyond helm-values/kagent.yaml" if PROD else "# no overrides") + "\n{}\n")
+
+# ------------------------------------------------------------------ gitops
+clean("gitops/apps")
+PSA = ("    managedNamespaceMetadata:\n      labels:\n"
+       "        pod-security.kubernetes.io/enforce: baseline\n"
+       "        pod-security.kubernetes.io/audit: restricted\n"
+       "        pod-security.kubernetes.io/warn: restricted\n")
+
+
+def sync(*opts, psa=False):
+    return ("  syncPolicy:\n    automated: { prune: true, selfHeal: true }\n"
+            + (PSA if psa else "")
+            + "    retry:\n      limit: 10\n      backoff: { duration: 30s, factor: 2, maxDuration: 5m }\n"
+            "    syncOptions:\n" + "".join(f"      - {o}\n" for o in opts))
+
+
+def app(name, wave, ns, source, opts=("CreateNamespace=true",), psa=True):
+    return (f"apiVersion: argoproj.io/v1alpha1\nkind: Application\nmetadata:\n  name: sre-agent-{name}\n"
+            f"  namespace: {ARGO}\n  annotations:\n    argocd.argoproj.io/sync-wave: \"{wave}\"\n"
+            "  finalizers: [resources-finalizer.argocd.argoproj.io/foreground]\n"
+            f"  labels: {{ app.kubernetes.io/part-of: governed-sre-agent, sre-agent/env: {ENV_NAME} }}\n"
+            "spec:\n  project: sre-agent\n"
+            f"  destination:\n    server: https://kubernetes.default.svc\n    namespace: {ns}\n"
+            + source + sync(*opts, psa=psa and ns in PLATFORM_NS))
+
+
+def helm(repo, chart, ver, values=(), release=None):
+    release = release or chart
+    if not values:
+        return (f"  source:\n    repoURL: {repo}\n    chart: {chart}\n    targetRevision: {ver}\n"
+                f"    helm:\n      releaseName: {release}\n")
+    vf = "".join(f"          - $values/{v}\n" for v in values)
+    return (f"  sources:\n    - repoURL: {repo}\n      chart: {chart}\n      targetRevision: {ver}\n"
+            f"      helm:\n        releaseName: {release}\n        valueFiles:\n{vf}"
+            f"    - repoURL: {REPO}\n      targetRevision: {REV}\n      ref: values\n")
+
+
+def git(path, repo=None, rev=None):
+    return f"  source:\n    repoURL: {repo or REPO}\n    targetRevision: {rev or REV}\n    path: {path}\n"
+
+
+def oci_repo(name, url):
+    return (f"---\napiVersion: v1\nkind: Secret\nmetadata:\n  name: sre-agent-repo-{name}-oci\n  namespace: {ARGO}\n"
+            "  labels: { argocd.argoproj.io/secret-type: repository }\nstringData:\n  type: helm\n"
+            f"  name: sre-agent-{name}\n  url: {url}\n  enableOCI: \"true\"\n")
+
+
+D = f"deploy/{ENV_NAME}"
+apps = {}
+if GW_CRDS:
+    apps["10-gateway-api-crds.yaml"] = app("gateway-api-crds", -30, "default",
+        git("config/crd", "https://github.com/kubernetes-sigs/gateway-api.git", V["gateway_api"]),
+        ("ServerSideApply=true",), psa=False)
+apps["20-agentgateway-crds.yaml"] = app("agentgateway-crds", -20, "agentgateway-system",
+    helm("cr.agentgateway.dev/charts", "agentgateway-crds", V["agentgateway"]), ("CreateNamespace=true", "ServerSideApply=true"))
+apps["21-kagent-crds.yaml"] = app("kagent-crds", -20, "kagent",
+    helm("ghcr.io/kagent-dev/kagent/helm", "kagent-crds", V["kagent"]), ("CreateNamespace=true", "ServerSideApply=true"))
+apps["30-agentgateway.yaml"] = app("agentgateway", -10, "agentgateway-system",
+    helm("cr.agentgateway.dev/charts", "agentgateway", V["agentgateway"], values=("helm-values/agentgateway.yaml",)))
+apps["31-otel-collector.yaml"] = app("otel-collector", -10, "sre-observability",
+    helm("https://open-telemetry.github.io/opentelemetry-helm-charts", "opentelemetry-collector", V["otel_collector"],
+         values=("helm-values/otel-collector.yaml", f"{D}/values/otel-collector.yaml"), release="otel-collector"))
+apps["40-kagent-tools.yaml"] = app("kagent-tools", -5, "kagent-tools",
+    helm("ghcr.io/kagent-dev/tools/helm", "kagent-tools", V["kagent_tools"], values=("helm-values/kagent-tools.yaml",)))
+apps["41-kagent-executor.yaml"] = app("kagent-executor", -5, "kagent-executor",
+    helm("ghcr.io/kagent-dev/tools/helm", "kagent-tools", V["kagent_tools"], values=("helm-values/kagent-executor.yaml",),
+         release="kagent-executor"))
+kv = ["helm-values/kagent.yaml", f"{D}/values/kagent.yaml"]
+if OIDC:
+    kv.append("helm-values/optional/kagent-oidc.yaml")
+if EXT_DB:
+    kv.append("helm-values/optional/kagent-external-postgres.yaml")
+apps["42-kagent.yaml"] = app("kagent", -5, "kagent",
+    helm("ghcr.io/kagent-dev/kagent/helm", "kagent", V["kagent"], values=tuple(kv)))
+apps["50-platform.yaml"] = app("platform", 0, "kagent", git(f"{D}/platform"), ("SkipDryRunOnMissingResource=true",), psa=False)
+if DEMO:
+    apps["60-demo-shop.yaml"] = app("demo-shop", 10, DEMO_NS, git(f"{D}/demo"),
+                                    ("SkipDryRunOnMissingResource=true",), psa=False)
+for name, body in apps.items():
+    write(f"gitops/apps/{name}", HEADER + body)
+
+dests = ["default", ARGO] + PLATFORM_NS + NAMESPACES + READONLY_NS
+write("gitops/project.yaml", HEADER +
+    "# Applied by scripts/install.sh before the root app. Fences what Argo CD may deploy for the agent:\n"
+    "# which repositories it pulls from and which namespaces it writes to. Nothing else in Argo CD changes.\n"
+    f"apiVersion: argoproj.io/v1alpha1\nkind: AppProject\nmetadata:\n  name: sre-agent\n  namespace: {ARGO}\n"
+    f"spec:\n  description: Governed SRE agent ({ENV_NAME}, {E('CLUSTER_NAME')})\n  sourceRepos:\n"
+    f"    - {REPO}\n    - https://github.com/kubernetes-sigs/gateway-api.git\n"
+    "    - cr.agentgateway.dev/charts\n    - ghcr.io/kagent-dev/kagent/helm\n"
+    "    - ghcr.io/kagent-dev/tools/helm\n    - https://open-telemetry.github.io/opentelemetry-helm-charts\n"
+    "  destinations:\n" + "".join(f"    - {{ server: https://kubernetes.default.svc, namespace: {n} }}\n" for n in dests)
+    + "  clusterResourceWhitelist:\n    - { group: \"*\", kind: \"*\" }\n"
+    "  namespaceResourceWhitelist:\n    - { group: \"*\", kind: \"*\" }\n"
+    + (f"  # Change window: automatic syncs (including self-heal) run only inside it; manual syncs are allowed.\n"
+       f"  syncWindows:\n    - kind: allow\n      schedule: \"{E('SYNC_WINDOW_CRON')}\"\n"
+       f"      duration: {E('SYNC_WINDOW_DURATION', '4h')}\n      applications: [\"sre-agent-*\"]\n      manualSync: true\n"
+       if E('SYNC_WINDOW_CRON') else "")
+    + oci_repo("agentgateway", "cr.agentgateway.dev/charts")
+    + oci_repo("kagent", "ghcr.io/kagent-dev/kagent/helm")
+    + oci_repo("kagent-tools", "ghcr.io/kagent-dev/tools/helm"))
+write("gitops/root.yaml", HEADER +
+    "# Applied ONCE by scripts/install.sh. Everything else is pulled from Git by this cluster's own Argo CD.\n"
+    "# Deleting this Application removes the whole platform (the finalizer cascades).\n"
+    f"apiVersion: argoproj.io/v1alpha1\nkind: Application\nmetadata:\n  name: sre-agent-root\n  namespace: {ARGO}\n"
+    "  finalizers: [resources-finalizer.argocd.argoproj.io/foreground]\n"
+    f"  labels: {{ app.kubernetes.io/part-of: governed-sre-agent, sre-agent/env: {ENV_NAME} }}\n"
+    "spec:\n  project: sre-agent\n"
+    f"  destination:\n    server: https://kubernetes.default.svc\n    namespace: {ARGO}\n"
+    f"  source:\n    repoURL: {REPO}\n    targetRevision: {REV}\n    path: {D}/gitops/apps\n"
+    "  syncPolicy:\n    automated: { prune: true, selfHeal: true }\n")
+
+print(f"  deploy/{ENV_NAME}/: platform ({'prod guardrails, ' if PROD else ''}"
+      f"{'egress lockdown' if EGRESS else 'no egress lockdown'}), values, gitops ({len(apps)} apps)")
+print(f"  scope: remediate in [{' '.join(NAMESPACES)}]" + (f", read-only in [{' '.join(READONLY_NS)}]" if READONLY_NS else ""))

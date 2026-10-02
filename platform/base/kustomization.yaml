@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Environment-neutral platform. Each environment's overlay is generated into
+# deploy/<env>/platform by `make configure ENV=<env>` and adds: settings (model, region,
+# MAX_REPLICAS), the agent's namespace scope, egress rules for that VPC, and for prod the
+# prod-guardrails component.
+resources:
+  - admission/validating-admission-policies.yaml
+  - admission/remediation-guard.yaml
+  - tools/rbac.yaml
+  - network/network-policies.yaml
+  - agentgateway/gateway.yaml
+  - agentgateway/routes.yaml
+  - agentgateway/llm-provider-bedrock.yaml
+  - agentgateway/policies.yaml
+  - kagent/model-and-tools.yaml
+  - kagent/agent-sre-triage.yaml
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: governed-sre-agent
+    includeSelectors: false   # never alter selectors (NetworkPolicy podSelector: {} must stay empty)

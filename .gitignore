@@ -1,0 +1,28 @@
+# Editor / local environment
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Secrets and local config
+.env
+.env.*
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+*.pfx
+
+# Runtime and logs
+*.log
+__pycache__/
+.venv/
+venv/
+node_modules/
+
+# Local generated artifacts
+coverage/
+.tmp/

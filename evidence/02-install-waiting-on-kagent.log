@@ -1,0 +1,136 @@
+bash-5.3$ make install ENV=dev
+./scripts/install.sh
+
+==> [dev] Gateway API CRDs: keeping the cluster's own (v1.5+)
+
+==> [dev] CRDs: agentgateway v1.5.0, kagent 0.10.1
+Pulled: cr.agentgateway.dev/charts/agentgateway-crds:v1.5.0
+Digest: sha256:3a6cf44559c612ac8afb7f867aace69bbd4cdba765f1def6377b7a3186c603e3
+Release "agentgateway-crds" has been upgraded. Happy Helming!
+NAME: agentgateway-crds
+LAST DEPLOYED: Thu Oct  1 23:13:07 2026
+NAMESPACE: agentgateway-system
+STATUS: deployed
+REVISION: 2
+DESCRIPTION: Upgrade complete
+TEST SUITE: None
+NOTES:
+Thank you for installing the agentgateway-crds chart.
+
+Your release "agentgateway-crds" has been deployed in the "agentgateway-system" namespace.
+
+This chart installs the Custom Resource Definitions (CRDs) required by agentgateway.
+
+To check the installed CRDs:
+
+  kubectl get crds | grep agentgateway.dev
+Pulled: ghcr.io/kagent-dev/kagent/helm/kagent-crds:0.10.1
+Digest: sha256:0b8eacbdc85e21ccad6c008e69ef623428db0be8e45c59492b40f3faff6dcf67
+Release "kagent-crds" has been upgraded. Happy Helming!
+NAME: kagent-crds
+LAST DEPLOYED: Thu Oct  1 23:13:18 2026
+NAMESPACE: kagent
+STATUS: deployed
+REVISION: 2
+DESCRIPTION: Upgrade complete
+TEST SUITE: None
+NOTES:
+
+
+==> [dev] agentgateway control plane
+Pulled: cr.agentgateway.dev/charts/agentgateway:v1.5.0
+Digest: sha256:9216ce83965ad2ce0888014d14aac5e71333fd9d4057cd167da92b37630fbee1
+I1001 23:13:29.580846    8714 warnings.go:107] "Warning: would violate PodSecurity \"restricted:latest\": seccompProfile (pod or container \"controller\" must set securityContext.seccompProfile.type to \"RuntimeDefault\" or \"Localhost\")"
+Release "agentgateway" has been upgraded. Happy Helming!
+NAME: agentgateway
+LAST DEPLOYED: Thu Oct  1 23:13:27 2026
+NAMESPACE: agentgateway-system
+STATUS: deployed
+REVISION: 2
+DESCRIPTION: Upgrade complete
+TEST SUITE: None
+NOTES:
+Thank you for installing the agentgateway chart.
+
+Your release "agentgateway" has been deployed in the "agentgateway-system" namespace.
+
+To check the status of the deployment:
+
+  helm status agentgateway --namespace agentgateway-system
+
+To view the resources created by this chart:
+
+  kubectl get all -n agentgateway-system
+
+To learn how to access and use agentgateway, please visit the official documentation:
+
+  https://agentgateway.dev/docs/kubernetes/latest/
+
+To uninstall the agentgateway deployment:
+
+  helm uninstall agentgateway --namespace agentgateway-system
+
+==> [dev] Namespaces with Pod Security labels (enforce baseline, audit + warn restricted)
+
+==> [dev] OpenTelemetry collector
+Release "otel-collector" has been upgraded. Happy Helming!
+NAME: otel-collector
+LAST DEPLOYED: Thu Oct  1 23:13:39 2026
+NAMESPACE: sre-observability
+STATUS: deployed
+REVISION: 2
+DESCRIPTION: Upgrade complete
+TEST SUITE: None
+NOTES:
+
+
+==> [dev] kagent-tools (read-only diagnostics) and kagent-executor (restart/scale)
+Release "kagent-tools" does not exist. Installing it now.
+Pulled: ghcr.io/kagent-dev/tools/helm/kagent-tools:0.3.0
+Digest: sha256:77933dc8a9206e8b9a2e90135aa29a069b26234a50cb046d13f9645f7af0f241
+NAME: kagent-tools
+LAST DEPLOYED: Thu Oct  1 23:13:42 2026
+NAMESPACE: kagent-tools
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+NOTES:
+################################ To open kagent UI: ###########################################
+#
+#  This is a Helm chart for Kagent Tools
+#
+#  1. Forward application port by running these commands in the terminal:
+#  kubectl -n kagent-tools port-forward service/kagent-tools 8084:8084 &
+#
+#  2. Then visit http://127.0.0.1:8084/mcp to use MCP
+#
+###############################################################################################
+Release "kagent-executor" does not exist. Installing it now.
+Pulled: ghcr.io/kagent-dev/tools/helm/kagent-tools:0.3.0
+Digest: sha256:77933dc8a9206e8b9a2e90135aa29a069b26234a50cb046d13f9645f7af0f241
+NAME: kagent-executor
+LAST DEPLOYED: Thu Oct  1 23:14:12 2026
+NAMESPACE: kagent-executor
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+NOTES:
+################################ To open kagent UI: ###########################################
+#
+#  This is a Helm chart for Kagent Tools
+#
+#  1. Forward application port by running these commands in the terminal:
+#  kubectl -n kagent-executor port-forward service/kagent-executor 8084:8084 &
+#
+#  2. Then visit http://127.0.0.1:8084/mcp to use MCP
+#
+###############################################################################################
+
+==> [dev] kagent
+Release "kagent" does not exist. Installing it now.
+Pulled: ghcr.io/kagent-dev/kagent/helm/kagent:0.10.1
+Digest: sha256:dc7fc61090725fd9f860d630a0ca66a1bd2a86d15e3fe267c0467c11cb198403
+
+

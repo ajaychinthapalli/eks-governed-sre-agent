@@ -1,0 +1,129 @@
+# --- Budget: tokens and requests per minute on the LLM route (per proxy replica). ---
+# Values here are placeholders: deploy/<env>/platform sets them from LLM_TOKENS_PER_MINUTE / LLM_REQUESTS_PER_MINUTE.
+# Over budget => HTTP 429; the request never reaches the model provider.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: llm-budget
+  namespace: agentgateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: llm
+  traffic:
+    rateLimit:
+      local:
+        - tokens: 60000
+          unit: Minutes
+        - requests: 60
+          unit: Minutes
+          burst: 10
+---
+# --- Secret guard: credentials found in an agent's context never leave the cluster. ---
+# The agent reads logs/events/env; those become the next prompt. Any credential => 403.
+# A pattern list catches known credential formats only; it is a backstop, not data-loss
+# prevention. Keep secrets out of logs and limit which namespaces the agent can read.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: llm-secret-guard
+  namespace: agentgateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: llm
+  backend:
+    ai:
+      promptGuard:
+        request:
+          - response:
+              statusCode: 403
+              message: "Blocked by agentgateway: the prompt contained what looks like a credential. Redact it and retry."
+            regex:
+              action: Reject
+              matches:
+                - "AKIA[0-9A-Z]{16}"                          # AWS access key ID
+                - "ASIA[0-9A-Z]{16}"                          # AWS temporary access key ID
+                - "-----BEGIN [A-Z ]*PRIVATE KEY-----"        # PEM private keys (incl. GCP SA key files)
+                - "\"type\": ?\"service_account\""            # GCP service-account JSON key
+                - "AIza[0-9A-Za-z_-]{35}"                     # Google API key
+                - "gh[pousr]_[A-Za-z0-9]{36,}"                # GitHub tokens
+                - "xox[baprs]-[A-Za-z0-9-]{10,}"              # Slack tokens
+---
+# --- Tool allowlists: least privilege at the MCP layer, one per identity (9 tools total). ---
+# tools/list returns only these; tools/call for anything else => "unauthorized tool call".
+# These rules see the tool NAME only (agentgateway's authorization CEL has no access to the call
+# arguments), so which ARGUMENTS are acceptable - restart but not undo, how many replicas - is
+# enforced by the API server in admission/remediation-guard.yaml.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: mcp-diagnostics-allowlist
+  namespace: agentgateway-system
+spec:
+  targetRefs:
+    - group: agentgateway.dev
+      kind: AgentgatewayBackend
+      name: k8s-diagnostics
+  backend:
+    mcp:
+      authorization:
+        action: Allow
+        policy:
+          matchExpressions:
+            - 'mcp.tool.name in ["k8s_get_resources", "k8s_describe_resource", "k8s_get_resource_yaml", "k8s_get_pod_logs", "k8s_get_events", "k8s_get_available_api_resources", "k8s_wait"]'
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: mcp-remediation-allowlist
+  namespace: agentgateway-system
+spec:
+  targetRefs:
+    - group: agentgateway.dev
+      kind: AgentgatewayBackend
+      name: k8s-remediation
+  backend:
+    mcp:
+      authorization:
+        action: Allow
+        policy:
+          matchExpressions:
+            - 'mcp.tool.name in ["k8s_rollout", "k8s_scale"]'
+---
+# --- Tracing: every LLM and MCP call becomes an OTel span, sent to the in-cluster collector. ---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: tracing
+  namespace: agentgateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: agentgateway-proxy
+  frontend:
+    tracing:
+      backendRef:
+        name: opentelemetry-collector
+        namespace: sre-observability
+        port: 4317
+      protocol: GRPC
+      randomSampling: "true"
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-agentgateway-tracing
+  namespace: sre-observability
+spec:
+  from:
+    - group: agentgateway.dev
+      kind: AgentgatewayPolicy
+      namespace: agentgateway-system
+  to:
+    - group: ""
+      kind: Service
+      name: opentelemetry-collector

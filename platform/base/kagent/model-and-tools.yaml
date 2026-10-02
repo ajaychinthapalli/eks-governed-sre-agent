@@ -1,0 +1,51 @@
+# One model name for every agent: `governed-llm`.
+# kagent speaks OpenAI chat-completions to agentgateway; the gateway decides which
+# Bedrock model actually serves it and holds the only credentials (EKS Pod Identity).
+# `spec.model` comes from cluster-settings.env.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: agentgateway-placeholder-key
+  namespace: kagent
+type: Opaque
+stringData:
+  key: "not-a-real-key"   # real credentials are the gateway's cloud identity
+---
+apiVersion: kagent.dev/v1alpha2
+kind: ModelConfig
+metadata:
+  name: governed-llm
+  namespace: kagent
+spec:
+  provider: OpenAI
+  model: SET_BY_SETTINGS
+  apiKeySecret: agentgateway-placeholder-key
+  apiKeySecretKey: key
+  openAI:
+    baseUrl: http://agentgateway-proxy.agentgateway-system.svc.cluster.local/v1
+    temperature: "0.2"
+    maxTokens: 4096
+---
+# Two tool sources for the agent, both through the gateway. They are separate so the
+# read path and the write path run as different identities (platform/base/tools/rbac.yaml).
+apiVersion: kagent.dev/v1alpha2
+kind: RemoteMCPServer
+metadata:
+  name: k8s-diagnostics
+  namespace: kagent
+spec:
+  description: Read-only Kubernetes diagnostics (kagent-tools --read-only), 7 tools via agentgateway
+  protocol: STREAMABLE_HTTP
+  url: http://agentgateway-proxy.agentgateway-system.svc.cluster.local/mcp/diag
+  timeout: 60s
+---
+apiVersion: kagent.dev/v1alpha2
+kind: RemoteMCPServer
+metadata:
+  name: k8s-remediation
+  namespace: kagent
+spec:
+  description: Restart and scale only (kagent-executor), human approval required, via agentgateway
+  protocol: STREAMABLE_HTTP
+  url: http://agentgateway-proxy.agentgateway-system.svc.cluster.local/mcp/exec
+  timeout: 60s

@@ -1,0 +1,145 @@
+# Policy as code, enforced by the Kubernetes API server itself
+# (ValidatingAdmissionPolicy, GA since 1.30 - no extra controller to run).
+# Every rejection is also written to the API audit log (validationActions: Audit),
+# which lands in CloudWatch when EKS control-plane "audit" logging is on.
+#
+# Together these make the gateway non-optional: an agent cannot be pointed at a
+# model or a tool server except through agentgateway.
+
+# 1. ModelConfigs must target the gateway (no direct Bedrock/OpenAI/Anthropic keys in kagent).
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: sre-modelconfig-via-gateway
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["kagent.dev"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["modelconfigs"]
+  matchConditions:
+    # kagent's chart always renders a placeholder default; agents are blocked from using it (policy 2).
+    - name: skip-chart-default
+      expression: "object.metadata.name != 'default-model-config'"
+  validations:
+    - expression: "!has(object.spec.provider) || object.spec.provider == 'OpenAI'"
+      message: "ModelConfigs must use provider OpenAI pointed at agentgateway; the gateway talks to the real provider."
+    - expression: >-
+        has(object.spec.openAI) && has(object.spec.openAI.baseUrl) &&
+        object.spec.openAI.baseUrl.startsWith('http://agentgateway-proxy.agentgateway-system.svc')
+      message: "ModelConfig openAI.baseUrl must be http://agentgateway-proxy.agentgateway-system.svc.cluster.local/v1"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: sre-modelconfig-via-gateway
+spec:
+  policyName: sre-modelconfig-via-gateway
+  validationActions: [Deny, Audit]
+---
+# 2. Agents must be declarative, use governed-llm, and use only RemoteMCPServer tools
+#    (BYO containers, MCPServer and plain Services could bypass the gateway).
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: sre-agent-governed
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["kagent.dev"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["agents"]
+  validations:
+    - expression: "object.spec.type == 'Declarative'"
+      message: "Only Declarative agents are allowed (BYO agent images bypass the gateway)."
+    - expression: >-
+        has(object.spec.declarative) && has(object.spec.declarative.modelConfig) &&
+        object.spec.declarative.modelConfig == 'governed-llm'
+      message: "Agents must set declarative.modelConfig: governed-llm"
+    - expression: >-
+        !has(object.spec.declarative) || !has(object.spec.declarative.tools) ||
+        object.spec.declarative.tools.all(t, t.type != 'McpServer' ||
+          (has(t.mcpServer) && has(t.mcpServer.kind) && t.mcpServer.kind == 'RemoteMCPServer' &&
+           t.mcpServer.name != 'kagent-tool-server'))
+      message: "Agent MCP tools must come from a RemoteMCPServer that points at agentgateway."
+    - expression: >-
+        !has(object.spec.declarative) || !has(object.spec.declarative.tools) ||
+        object.spec.declarative.tools.all(t, t.type != 'McpServer' || !has(t.mcpServer) ||
+          t.mcpServer.name != 'k8s-remediation' ||
+          (has(t.mcpServer.toolNames) && has(t.mcpServer.requireApproval) &&
+           t.mcpServer.toolNames.all(n, n in t.mcpServer.requireApproval)))
+      message: "Every tool an agent uses from k8s-remediation must be listed in requireApproval (a person approves every write)."
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: sre-agent-governed
+spec:
+  policyName: sre-agent-governed
+  validationActions: [Deny, Audit]
+---
+# 3. RemoteMCPServers must point at the gateway.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: sre-mcp-via-gateway
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["kagent.dev"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["remotemcpservers"]
+  matchConditions:
+    - name: skip-chart-builtin
+      expression: "object.metadata.name != 'kagent-tool-server'"
+  validations:
+    - expression: "object.spec.url.startsWith('http://agentgateway-proxy.agentgateway-system.svc')"
+      message: "RemoteMCPServer url must go through agentgateway (http://agentgateway-proxy.agentgateway-system.svc.cluster.local/...)."
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: sre-mcp-via-gateway
+spec:
+  policyName: sre-mcp-via-gateway
+  validationActions: [Deny, Audit]
+---
+# 4. Nothing in the gateway namespace may get a public load balancer.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: sre-gateway-not-public
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: agentgateway-system
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["services"]
+  validations:
+    - expression: >-
+        object.spec.type != 'LoadBalancer' ||
+        (has(object.metadata.annotations) && (
+          ('service.beta.kubernetes.io/aws-load-balancer-scheme' in object.metadata.annotations &&
+             object.metadata.annotations['service.beta.kubernetes.io/aws-load-balancer-scheme'] == 'internal') ||
+          ('service.beta.kubernetes.io/aws-load-balancer-internal' in object.metadata.annotations &&
+             object.metadata.annotations['service.beta.kubernetes.io/aws-load-balancer-internal'] == 'true')))
+      message: "Services in agentgateway-system must be ClusterIP or an INTERNAL load balancer."
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: sre-gateway-not-public
+spec:
+  policyName: sre-gateway-not-public
+  validationActions: [Deny, Audit]

@@ -1,0 +1,137 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: sre-sandbox
+spec:
+  ports:
+  - port: 80
+    targetPort: 80
+  selector:
+    app: frontend
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog
+  namespace: sre-sandbox
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: catalog
+  template:
+    metadata:
+      labels:
+        app: catalog
+    spec:
+      containers:
+      - image: public.ecr.aws/nginx/nginx:1.27-alpne
+        name: catalog
+        resources:
+          limits:
+            memory: 64Mi
+          requests:
+            cpu: 10m
+            memory: 32Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout
+  namespace: sre-sandbox
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: checkout
+  template:
+    metadata:
+      labels:
+        app: checkout
+    spec:
+      containers:
+      - args:
+        - |
+          echo "checkout-svc v2.4.1 starting"
+          echo "loading config from environment"
+          if [ -z "$PAYMENTS_API_URL" ]; then
+            echo "FATAL: required env var PAYMENTS_API_URL is not set; refusing to start" >&2
+            exit 1
+          fi
+          sleep 3600
+        command:
+        - sh
+        - -c
+        env:
+        - name: CURRENCY
+          value: USD
+        image: public.ecr.aws/docker/library/busybox:1.36
+        name: checkout
+        resources:
+          limits:
+            memory: 32Mi
+          requests:
+            cpu: 10m
+            memory: 16Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: sre-sandbox
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+      - image: public.ecr.aws/nginx/nginx:1.27-alpine
+        name: web
+        ports:
+        - containerPort: 80
+        resources:
+          limits:
+            memory: 64Mi
+          requests:
+            cpu: 10m
+            memory: 32Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: recommender
+  namespace: sre-sandbox
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: recommender
+  template:
+    metadata:
+      labels:
+        app: recommender
+    spec:
+      containers:
+      - args:
+        - |
+          print("recommender: loading model weights into memory", flush=True)
+          blob = bytearray(200 * 1024 * 1024)   # ~200 MiB
+          print("model loaded", flush=True)
+          import time; time.sleep(3600)
+        command:
+        - python
+        - -c
+        image: public.ecr.aws/docker/library/python:3.12-alpine
+        name: recommender
+        resources:
+          limits:
+            memory: 64Mi
+          requests:
+            cpu: 10m
+            memory: 32Mi

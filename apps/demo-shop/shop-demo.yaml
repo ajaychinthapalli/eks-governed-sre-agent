@@ -1,0 +1,113 @@
+# Sample app (written for namespace shop-demo; deploy/<env>/demo moves it to DEMO_NAMESPACE, and the
+# namespace + agent RBAC come from deploy/<env>/platform/app-scope.yaml): three broken workloads, each failing for a
+# different reason, plus one healthy service. The triage agent should find
+# all three root causes without being told what is wrong.
+# Healthy: should be reported as fine.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: shop-demo
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: frontend } }
+  template:
+    metadata: { labels: { app: frontend } }
+    spec:
+      containers:
+        - name: web
+          image: public.ecr.aws/nginx/nginx:1.27-alpine
+          ports: [{ containerPort: 80 }]
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 64Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: shop-demo
+spec:
+  selector: { app: frontend }
+  ports: [{ port: 80, targetPort: 80 }]
+---
+# Broken #1 - CrashLoopBackOff: required config missing.
+# Root cause only visible in the container logs.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout
+  namespace: shop-demo
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: checkout } }
+  template:
+    metadata: { labels: { app: checkout } }
+    spec:
+      containers:
+        - name: checkout
+          image: public.ecr.aws/docker/library/busybox:1.36
+          command: ["sh", "-c"]
+          args:
+            - |
+              echo "checkout-svc v2.4.1 starting"
+              echo "loading config from environment"
+              if [ -z "$PAYMENTS_API_URL" ]; then
+                echo "FATAL: required env var PAYMENTS_API_URL is not set; refusing to start" >&2
+                exit 1
+              fi
+              sleep 3600
+          env:
+            - name: CURRENCY
+              value: USD
+            # PAYMENTS_API_URL deliberately missing
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 32Mi }
+---
+# Broken #2 - ImagePullBackOff: typo in the image tag.
+# Root cause visible in events.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog
+  namespace: shop-demo
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: catalog } }
+  template:
+    metadata: { labels: { app: catalog } }
+    spec:
+      containers:
+        - name: catalog
+          image: public.ecr.aws/nginx/nginx:1.27-alpne   # typo: "alpne"
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 64Mi }
+---
+# Broken #3 - OOMKilled: memory limit far below what the process needs.
+# Root cause visible in the pod's last terminated state.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: recommender
+  namespace: shop-demo
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: recommender } }
+  template:
+    metadata: { labels: { app: recommender } }
+    spec:
+      containers:
+        - name: recommender
+          image: public.ecr.aws/docker/library/python:3.12-alpine
+          command: ["python", "-c"]
+          args:
+            - |
+              print("recommender: loading model weights into memory", flush=True)
+              blob = bytearray(200 * 1024 * 1024)   # ~200 MiB
+              print("model loaded", flush=True)
+              import time; time.sleep(3600)
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 64Mi }

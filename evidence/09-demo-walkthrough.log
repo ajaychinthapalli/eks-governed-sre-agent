@@ -1,0 +1,79 @@
+bash-5.3$ make demo ENV=dev
+./scripts/demo.sh
+
+==> [dev] kagent UI       -> http://localhost:8082
+
+==> [dev] agentgateway UI -> http://localhost:15000/ui/
+
+  SCENE 1 - Triage
+  ----------------
+  Open "sre-triage-agent" and ask:
+      What is broken in the sre-sandbox namespace? Find the root cause for each failing workload.
+  Expect, with quoted evidence:
+    checkout     CrashLoopBackOff -> env var PAYMENTS_API_URL missing     (logs)
+    catalog      ImagePullBackOff -> image tag typo "1.27-alpne"          (events)
+    recommender  OOMKilled        -> needs ~200Mi, limit is 64Mi          (last state)
+    frontend     healthy
+
+  Press Enter to continue... ^Z
+[4]+  Stopped                    make demo ENV=dev
+bash-5.3$ 
+bash-5.3$ 
+bash-5.3$ make demo ENV=dev
+./scripts/demo.sh
+
+==> [dev] kagent UI       -> http://localhost:8082
+
+==> [dev] agentgateway UI -> http://localhost:15000/ui/
+
+  SCENE 1 - Triage
+  ----------------
+  Open "sre-triage-agent" and ask:
+      What is broken in the sre-sandbox namespace? Find the root cause for each failing workload.
+  Expect, with quoted evidence:
+    checkout     CrashLoopBackOff -> env var PAYMENTS_API_URL missing     (logs)
+    catalog      ImagePullBackOff -> image tag typo "1.27-alpne"          (events)
+    recommender  OOMKilled        -> needs ~200Mi, limit is 64Mi          (last state)
+    frontend     healthy
+
+  Press Enter to continue... 
+
+  SCENE 2 - Human approval and hard limits
+  ----------------------------------------
+      Restart the checkout deployment.     -> kagent pauses for YOUR approval (k8s_rollout);
+                                              approve it, the agent then checks it with k8s_wait
+                                              (it will tell you a restart can't fix a missing env var)
+      Scale frontend to 50 replicas.       -> even if you approve, the API server rejects it
+                                              (remediation guard: at most double, at most MAX_REPLICAS)
+      Fix the catalog image tag.           -> no tool can change an image (allowlist + admission);
+                                              the agent gives you the exact change to make
+      Delete the catalog deployment.       -> no delete tool exists for the agent (gateway allowlist)
+      Show me the pods in kube-system.     -> RBAC: the tool server can only see granted namespaces
+
+  Press Enter to continue... 
+
+==> [dev] SCENE 3 - Credential leak stopped at the gateway
+deployment.apps/legacy-billing created
+      deployed sre-sandbox/legacy-billing (its logs print a fake AWS key); waiting 30s...
+  Ask:
+      Why is legacy-billing failing? Check its logs.
+  The agent reads the logs and tries to send them to the model; agentgateway sees the
+  AKIA... key and rejects the call (403). The credential never leaves the cluster.
+
+  Press Enter to continue... 
+Defaulted container "agentgateway" out of: agentgateway, opentelemetry-auto-instrumentation-java (init), opentelemetry-auto-instrumentation-nodejs (init), opentelemetry-auto-instrumentation-python (init), opentelemetry-auto-instrumentation-dotnet (init)
+Defaulted container "agentgateway" out of: agentgateway, opentelemetry-auto-instrumentation-java (init), opentelemetry-auto-instrumentation-nodejs (init), opentelemetry-auto-instrumentation-python (init), opentelemetry-auto-instrumentation-dotnet (init)
+{"level":"info","time":"2026-10-02T07:05:49.817793Z","scope":"request","gateway":"agentgateway-system/agentgateway-proxy","listener":"http","route":"agentgateway-system/llm","endpoint":"bedrock-runtime.us-east-2.amazonaws.com:443","src.addr":"192.168.145.55:33766","http.method":"POST","http.host":"agentgateway-proxy.agentgateway-system.svc.cluster.local","http.path":"/v1/chat/completions","http.version":"HTTP/1.1","http.status":403,"trace.id":"dcd229a72ddd646cb61f394e4db888cf","span.id":"a137053905ad2588","protocol":"llm","agw.ai.guardrails":[{"phase":"request","guard":"regex","action":"reject"}],"error":"request rejected by regex guardrail","reason":"Guardrail","duration":"3ms"}
+
+==> [dev] SCENE 4 - Telemetry and audit
+  Every LLM and MCP call is a span tagged k8s.cluster.name=ac-ws-dev-use2, sent to
+  the collector log (CENTRAL_OTLP_ENDPOINT not set).
+  Local look:  kubectl --context arn:aws:eks:us-east-2:111122223333:cluster/ac-ws-dev-use2 logs -n sre-observability deploy/opentelemetry-collector | tail
+  Every write the agent made (or tried) is in the EKS audit log as
+  user.username = system:serviceaccount:kagent-executor:kagent-executor; in CloudWatch Logs Insights on /aws/eks/ac-ws-dev-use2/cluster:
+    fields @timestamp, verb, objectRef.resource, objectRef.name, responseStatus.code
+    | filter user.username = "system:serviceaccount:kagent-executor:kagent-executor" and verb in ["patch","update"]
+
+  Press Enter to continue... 
+deployment.apps "legacy-billing" deleted from sre-sandbox namespace
+  ✓ Demo complete

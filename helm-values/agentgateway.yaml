@@ -1,0 +1,4 @@
+# agentgateway control plane. Chart defaults are used.
+# Proxy pods (replicas/HPA/PDB/service type) are set by AgentgatewayParameters in
+# platform/agentgateway/gateway.yaml, not here.
+{}
