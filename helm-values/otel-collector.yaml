@@ -1,0 +1,101 @@
+# OpenTelemetry Collector for the SRE agent ("central observability" in the diagram).
+# Receives traces/logs from agentgateway, kagent and kagent-tools, scrapes agentgateway
+# metrics, stamps everything with cloud + cluster identity, and ships it to your central
+# OTLP backend (Grafana Cloud, Honeycomb, Datadog, Amazon Managed Prometheus via ADOT,
+# a self-hosted Tempo/Mimir/Loki, ...). With CENTRAL_OTLP_ENDPOINT empty in envs/<env>.env,
+# every pipeline exports to the debug exporter only (collector logs).
+fullnameOverride: opentelemetry-collector
+mode: deployment
+replicaCount: 2
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+# Pod Security "restricted"
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile: { type: RuntimeDefault }
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities: { drop: [ALL] }
+
+image:
+  repository: otel/opentelemetry-collector-contrib
+
+presets:
+  kubernetesAttributes:
+    enabled: true
+
+clusterRole:
+  create: true
+  rules:
+    - apiGroups: [""]
+      resources: ["pods", "endpoints", "services", "namespaces"]
+      verbs: ["get", "list", "watch"]
+
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits: { memory: 512Mi }
+
+config:
+  receivers:
+    otlp:
+      protocols:
+        grpc: { endpoint: "${env:MY_POD_IP}:4317" }
+        http: { endpoint: "${env:MY_POD_IP}:4318" }
+    prometheus:
+      config:
+        scrape_configs:
+          - job_name: agentgateway
+            scrape_interval: 30s
+            kubernetes_sd_configs:
+              - role: pod
+                namespaces: { names: [agentgateway-system] }
+            relabel_configs:
+              - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+                action: keep
+                regex: "true"
+              - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+                action: replace
+                regex: ([^:]+)(?::\d+)?;(\d+)
+                replacement: $$1:$$2
+                target_label: __address__
+              - source_labels: [__meta_kubernetes_pod_name]
+                target_label: k8s_pod_name
+  processors:
+    memory_limiter:
+      check_interval: 5s
+      limit_percentage: 80
+      spike_limit_percentage: 25
+    batch: {}
+    resource/cluster:
+      attributes:
+        - { key: cloud.provider,      value: "${env:CLOUD_PROVIDER}", action: upsert }
+        - { key: cloud.region,        value: "${env:CLOUD_REGION}",   action: upsert }
+        - { key: k8s.cluster.name,    value: "${env:CLUSTER_NAME}",   action: upsert }
+        - { key: deployment.environment, value: "${env:ENVIRONMENT}", action: upsert }
+  exporters:
+    otlp_http/central:
+      endpoint: "${env:CENTRAL_OTLP_ENDPOINT}"
+      headers:
+        authorization: "${env:CENTRAL_OTLP_AUTH}"
+    debug:
+      verbosity: basic
+  service:
+    pipelines:
+      traces:
+        receivers: [otlp]
+        processors: [memory_limiter, k8s_attributes, resource/cluster, batch]
+        exporters: [debug]
+      metrics:
+        receivers: [otlp, prometheus]
+        processors: [memory_limiter, k8s_attributes, resource/cluster, batch]
+        exporters: [debug]
+      logs:
+        receivers: [otlp]
+        processors: [memory_limiter, k8s_attributes, resource/cluster, batch]
+        exporters: [debug]
+
+# Cluster identity (extraEnvs) and which exporters each pipeline uses come from
+# deploy/<env>/values/otel-collector.yaml.

@@ -1,0 +1,42 @@
+# OPTIONAL: authenticated access to the kagent UI (OIDC via oauth2-proxy) instead of
+# port-forward. Turn on with KAGENT_OIDC=true in envs/<env>.env, then make configure ENV=<env>
+# (which also opens oauth2-proxy:4180 to the VPC and its egress to your IdP).
+# Prereqs: an OIDC client in your IdP (Okta, Entra ID, Google, Keycloak, Cognito...)
+# and a Secret in the kagent namespace:
+#   kubectl -n kagent create secret generic kagent-oidc \
+#     --from-literal=client-id=... --from-literal=client-secret=... \
+#     --from-literal=cookie-secret=$(openssl rand -base64 32 | head -c 32)
+controller:
+  auth:
+    mode: trusted-proxy      # controller trusts the JWT that oauth2-proxy forwards
+    userIdClaim: email
+
+oauth2-proxy:
+  enabled: true
+  config:
+    existingSecret: kagent-oidc
+  extraEnv:
+    - name: OIDC_ISSUER_URL
+      value: "https://YOUR_IDP/oauth2/default"
+    - name: OIDC_REDIRECT_URL
+      value: "https://kagent.internal.example.com/oauth2/callback"
+    - name: UPSTREAM_URL
+      value: "http://kagent-ui:8080"
+  extraArgs:
+    provider: oidc
+    oidc-issuer-url: "$(OIDC_ISSUER_URL)"
+    redirect-url: "$(OIDC_REDIRECT_URL)"
+    upstream: "$(UPSTREAM_URL)"
+    email-domain: "*"
+    # RBAC at the door: only members of these IdP groups can use the agent UI.
+    allowed-group: "sre-oncall"
+    oidc-groups-claim: groups
+    scope: "openid profile email groups"
+    pass-authorization-header: true
+    set-authorization-header: true
+    skip-jwt-bearer-tokens: true
+    cookie-secure: true
+    cookie-samesite: "lax"
+    skip-auth-route: "^/(health|login)$"
+  service:
+    type: ClusterIP   # expose through an INTERNAL load balancer / your internal ingress only

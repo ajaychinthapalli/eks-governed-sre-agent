@@ -1,0 +1,44 @@
+# Remediation executor: release "kagent-executor" in namespace "kagent-executor".
+# Write-capable build of the same server. The gateway exposes only k8s_rollout and k8s_scale from
+# it, kagent requires approval for both, RBAC allows get+patch only, and admission limits the fields.
+replicaCount: 2
+
+rbac:
+  create: false          # chart default is cluster-admin; least privilege is in platform/base/tools/rbac.yaml
+
+tools:
+  loglevel: info
+  enabledTools:
+    - k8s                # helm/istio/cilium/argo/... providers are not loaded
+  k8s:
+    tokenPassthrough: false
+  env:                   # read-only root filesystem: kubectl's cache goes to the chart's /tmp emptyDir
+    - { name: HOME, value: /tmp }
+    - { name: KUBECACHEDIR, value: /tmp/kube-cache }
+  metrics:
+    port: 8085           # own port: otherwise the chart declares 8084 twice, which Helm 4 (server-side apply) rejects
+  resources:
+    requests: { cpu: 50m, memory: 96Mi }
+    limits: { memory: 512Mi }
+
+# Pod Security "restricted"
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile: { type: RuntimeDefault }
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 65532
+  capabilities: { drop: [ALL] }
+
+service:
+  type: ClusterIP
+
+otel:
+  tracing:
+    enabled: true
+    exporter:
+      otlp:
+        endpoint: http://opentelemetry-collector.sre-observability.svc.cluster.local:4317
+        insecure: true

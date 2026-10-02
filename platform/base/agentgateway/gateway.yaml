@@ -1,0 +1,64 @@
+# The single egress point for every LLM call and every MCP tool call.
+# ClusterIP only: the proxy holds cloud credentials that can invoke a model, so it
+# must never be internet-facing (a LoadBalancer Service on EKS can be internet-facing).
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayParameters
+metadata:
+  name: agentgateway-proxy-params
+  namespace: agentgateway-system
+spec:
+  logging:
+    format: json
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: "1", memory: 512Mi }
+  deployment:
+    spec:
+      template:
+        metadata:
+          annotations:
+            prometheus.io/scrape: "true"
+            prometheus.io/port: "15020"
+        spec:
+          topologySpreadConstraints:
+            - maxSkew: 1
+              topologyKey: topology.kubernetes.io/zone
+              whenUnsatisfiable: ScheduleAnyway
+              labelSelector:
+                matchLabels:
+                  gateway.networking.k8s.io/gateway-name: agentgateway-proxy
+  service:
+    spec:
+      type: ClusterIP
+  horizontalPodAutoscaler:
+    spec:
+      minReplicas: 2
+      maxReplicas: 6
+      metrics:
+        - type: Resource
+          resource:
+            name: cpu
+            target: { type: Utilization, averageUtilization: 70 }
+  podDisruptionBudget:
+    spec:
+      minAvailable: 1
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: agentgateway-proxy
+  namespace: agentgateway-system
+spec:
+  gatewayClassName: agentgateway
+  infrastructure:
+    parametersRef:
+      group: agentgateway.dev
+      kind: AgentgatewayParameters
+      name: agentgateway-proxy-params
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Same

@@ -1,0 +1,6 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+# AWS_AUTH_MODE=irsa only: annotates the gateway's ServiceAccount with the IAM role.
+# The role ARN is set by the environment overlay (deploy/<env>/platform) with a patch.
+patches:
+  - path: irsa-patch.yaml

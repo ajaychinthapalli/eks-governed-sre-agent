@@ -1,0 +1,60 @@
+# kagent: UI, controller and the agent runtime.
+# Every agent uses ModelConfig `governed-llm` (platform/kagent), so the chart's default
+# ModelConfig is an unused placeholder. Admission policy forbids agents from using it.
+providers:
+  default: openAI
+  openAI:
+    apiKey: "unused-all-llm-traffic-goes-through-agentgateway"
+
+# The tool server is installed separately in its own namespace (kagent-tools chart).
+kagent-tools:
+  enabled: false
+kmcp:
+  enabled: false   # MCPServer (kmcp) deployments are not used; admission policy only allows RemoteMCPServer tools
+
+# Bundled agents call tools directly and would bypass the gateway; keep them off.
+k8s-agent:            { enabled: false }
+kgateway-agent:       { enabled: false }
+istio-agent:          { enabled: false }
+promql-agent:         { enabled: false }
+observability-agent:  { enabled: false }
+argo-rollouts-agent:  { enabled: false }
+helm-agent:           { enabled: false }
+cilium-policy-agent:  { enabled: false }
+cilium-manager-agent: { enabled: false }
+cilium-debug-agent:   { enabled: false }
+grafana-mcp:          { enabled: false }
+
+ui:
+  service:
+    type: ClusterIP   # port-forward for development; OIDC: helm-values/optional/kagent-oidc.yaml
+
+controller:
+  # Fail long-running A2A calls eventually instead of hanging forever.
+  a2aClientTimeout: "30m"
+  # Default mode. Every caller is treated as admin@kagent.dev, which is why
+  # platform/network/network-policies.yaml lets only kagent's own pods reach the controller.
+  # helm-values/optional/kagent-oidc.yaml switches this to trusted-proxy behind oauth2-proxy.
+  auth:
+    mode: unsecure
+
+database:
+  postgres:
+    # Conversations contain cluster evidence (logs, events, YAML). Delete sessions that have
+    # been idle for 30 days instead of keeping them forever (chart default 0 = never).
+    sessionRetentionDays: 30
+
+otel:
+  tracing:
+    enabled: true
+    exporter:
+      otlp:
+        endpoint: "opentelemetry-collector.sre-observability.svc.cluster.local:4317"
+        protocol: grpc
+        insecure: true
+  logging:
+    enabled: true
+    exporter:
+      otlp:
+        endpoint: "opentelemetry-collector.sre-observability.svc.cluster.local:4317"
+        insecure: true

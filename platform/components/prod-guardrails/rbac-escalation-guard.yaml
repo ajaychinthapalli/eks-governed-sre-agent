@@ -1,0 +1,55 @@
+# Production: nobody but Argo CD (and an explicit break-glass group) may widen what the
+# agent's tool identities can do. Without this, anyone who can create a RoleBinding could
+# quietly give kagent-tools or kagent-executor more power - the agent would inherit it.
+#
+# Protected:
+#   * RoleBindings / ClusterRoleBindings whose subjects include kagent-tools/kagent-tools or
+#     kagent-executor/kagent-executor, or whose roleRef is an sre-agent-* ClusterRole
+#   * the sre-agent-* ClusterRoles themselves
+# Allowed to change them: ARGOCD_CONTROLLER and members of BREAKGLASS_GROUPS, both read from
+# the sre-cluster-settings ConfigMap (deploy/<env>/platform/settings.env).
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: sre-rbac-escalation-guard
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["rbac.authorization.k8s.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["rolebindings", "clusterrolebindings", "clusterroles"]
+  # Only the protected objects match, so every other RBAC change in the cluster is untouched
+  # (and a missing settings ConfigMap can only block changes to the agent's own RBAC).
+  matchConditions:
+    - name: agent-rbac-only
+      expression: >-
+        (has(object.subjects) && object.subjects.exists(s, s.kind == 'ServiceAccount' &&
+          ((s.namespace == 'kagent-tools' && s.name == 'kagent-tools') ||
+           (s.namespace == 'kagent-executor' && s.name == 'kagent-executor')))) ||
+        (has(object.roleRef) && object.roleRef.name.startsWith('sre-agent-')) ||
+        (request.resource.resource == 'clusterroles' && object.metadata.name.startsWith('sre-agent-'))
+  validations:
+    - expression: >-
+        request.userInfo.username == params.data.ARGOCD_CONTROLLER ||
+        (has(request.userInfo.groups) &&
+         request.userInfo.groups.exists(g, g in params.data.BREAKGLASS_GROUPS.split(',')))
+      messageExpression: >-
+        'RBAC for the SRE agent is managed by GitOps only: ' + request.userInfo.username +
+        ' may not change bindings for the agent tool identities or sre-agent-* roles. Change it in Git.'
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: sre-rbac-escalation-guard
+spec:
+  policyName: sre-rbac-escalation-guard
+  paramRef:
+    name: sre-cluster-settings
+    namespace: kagent
+    parameterNotFoundAction: Deny
+  validationActions: [Deny, Audit]

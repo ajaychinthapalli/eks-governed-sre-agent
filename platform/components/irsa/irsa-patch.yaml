@@ -1,0 +1,13 @@
+# IRSA annotation on the gateway ServiceAccount. The ARN below is replaced by the
+# environment overlay (deploy/<env>/platform/kustomization.yaml) with the role that
+# scripts/aws-setup.sh creates.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayParameters
+metadata:
+  name: agentgateway-proxy-params
+  namespace: agentgateway-system
+spec:
+  serviceAccount:
+    metadata:
+      annotations:
+        eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/my-eks-cluster-agentgateway-bedrock

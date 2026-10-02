@@ -1,0 +1,105 @@
+# Two identities, two tool servers (identity split):
+#
+#   kagent-tools/kagent-tools        diagnostics: runs with --read-only (write tools are not
+#                                    even registered) and RBAC that can only get/list/watch.
+#   kagent-executor/kagent-executor  remediation: exposed through the gateway for exactly two
+#                                    tools (k8s_rollout, k8s_scale), every call approved by a person,
+#                                    RBAC = get + patch workloads and the deployments/scale
+#                                    subresource only, and admission/remediation-guard.yaml limits
+#                                    what a patch or scale may change.
+#
+# Neither can read Secrets, delete, create, exec, or touch RBAC. Both are bound per application
+# namespace (platform app-scope, generated from APP_NAMESPACES); only the reader gets the
+# cluster-scoped read of namespaces and nodes.
+
+# ---- diagnostics (read-only) -------------------------------------------------------------
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sre-agent-cluster-read
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces", "nodes"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: sre-agent-cluster-read
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: sre-agent-cluster-read
+subjects:
+  - kind: ServiceAccount
+    name: kagent-tools
+    namespace: kagent-tools
+---
+# Bound in each application namespace to kagent-tools/kagent-tools.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sre-agent-app-read
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "events", "services", "endpoints", "configmaps",
+                "persistentvolumeclaims", "replicationcontrollers", "resourcequotas", "limitranges"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list", "watch"]
+---
+# ---- remediation (executor) --------------------------------------------------------------
+# Bound in each application namespace to kagent-executor/kagent-executor.
+# `kubectl rollout restart` = get + patch on the workload; `kubectl scale` = get + patch on the
+# scale subresource. RBAC cannot limit WHICH fields a patch changes: admission/remediation-guard.yaml
+# allows only the restart annotation, and 1..MAX_REPLICAS replicas at most doubling.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sre-agent-app-remediate
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale"]
+    verbs: ["get", "patch", "update"]
+---
+# ---- PodDisruptionBudgets for the two tool servers (2 replicas each) ----------------------
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: kagent-tools
+  namespace: kagent-tools
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: kagent-tools
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: kagent-executor
+  namespace: kagent-executor
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: kagent-executor

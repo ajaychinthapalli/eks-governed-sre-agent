@@ -1,0 +1,288 @@
+make install ENV=dev
+./scripts/install.sh
+
+==> [dev] Gateway API CRDs: keeping the cluster's own (v1.5+)
+
+==> [dev] CRDs: agentgateway v1.5.0, kagent 0.10.1
+Pulled: cr.agentgateway.dev/charts/agentgateway-crds:v1.5.0
+Digest: sha256:3a6cf44559c612ac8afb7f867aace69bbd4cdba765f1def6377b7a3186c603e3
+Release "agentgateway-crds" has been upgraded. Happy Helming!
+NAME: agentgateway-crds
+LAST DEPLOYED: Thu Oct  1 23:43:35 2026
+NAMESPACE: agentgateway-system
+STATUS: deployed
+REVISION: 4
+DESCRIPTION: Upgrade complete
+TEST SUITE: None
+NOTES:
+Thank you for installing the agentgateway-crds chart.
+
+Your release "agentgateway-crds" has been deployed in the "agentgateway-system" namespace.
+
+This chart installs the Custom Resource Definitions (CRDs) required by agentgateway.
+
+To check the installed CRDs:
+
+  kubectl get crds | grep agentgateway.dev
+Pulled: ghcr.io/kagent-dev/kagent/helm/kagent-crds:0.10.1
+Digest: sha256:0b8eacbdc85e21ccad6c008e69ef623428db0be8e45c59492b40f3faff6dcf67
+Release "kagent-crds" has been upgraded. Happy Helming!
+NAME: kagent-crds
+LAST DEPLOYED: Thu Oct  1 23:43:44 2026
+NAMESPACE: kagent
+STATUS: deployed
+REVISION: 4
+DESCRIPTION: Upgrade complete
+TEST SUITE: None
+NOTES:
+
+
+==> [dev] agentgateway control plane
+Pulled: cr.agentgateway.dev/charts/agentgateway:v1.5.0
+Digest: sha256:9216ce83965ad2ce0888014d14aac5e71333fd9d4057cd167da92b37630fbee1
+I1001 23:43:56.054730   11036 warnings.go:107] "Warning: would violate PodSecurity \"restricted:latest\": seccompProfile (pod or container \"controller\" must set securityContext.seccompProfile.type to \"RuntimeDefault\" or \"Localhost\")"
+Release "agentgateway" has been upgraded. Happy Helming!
+NAME: agentgateway
+LAST DEPLOYED: Thu Oct  1 23:43:54 2026
+NAMESPACE: agentgateway-system
+STATUS: deployed
+REVISION: 4
+DESCRIPTION: Upgrade complete
+TEST SUITE: None
+NOTES:
+Thank you for installing the agentgateway chart.
+
+Your release "agentgateway" has been deployed in the "agentgateway-system" namespace.
+
+To check the status of the deployment:
+
+  helm status agentgateway --namespace agentgateway-system
+
+To view the resources created by this chart:
+
+  kubectl get all -n agentgateway-system
+
+To learn how to access and use agentgateway, please visit the official documentation:
+
+  https://agentgateway.dev/docs/kubernetes/latest/
+
+To uninstall the agentgateway deployment:
+
+  helm uninstall agentgateway --namespace agentgateway-system
+
+==> [dev] Namespaces with Pod Security labels (enforce baseline, audit + warn restricted)
+
+==> [dev] OpenTelemetry collector
+Release "otel-collector" has been upgraded. Happy Helming!
+NAME: otel-collector
+LAST DEPLOYED: Thu Oct  1 23:44:05 2026
+NAMESPACE: sre-observability
+STATUS: deployed
+REVISION: 4
+DESCRIPTION: Upgrade complete
+TEST SUITE: None
+NOTES:
+
+
+==> [dev] kagent-tools (read-only diagnostics) and kagent-executor (restart/scale)
+Pulled: ghcr.io/kagent-dev/tools/helm/kagent-tools:0.3.0
+Digest: sha256:77933dc8a9206e8b9a2e90135aa29a069b26234a50cb046d13f9645f7af0f241
+Release "kagent-tools" has been upgraded. Happy Helming!
+NAME: kagent-tools
+LAST DEPLOYED: Thu Oct  1 23:44:09 2026
+NAMESPACE: kagent-tools
+STATUS: deployed
+REVISION: 3
+DESCRIPTION: Upgrade complete
+TEST SUITE: None
+NOTES:
+################################ To open kagent UI: ###########################################
+#
+#  This is a Helm chart for Kagent Tools
+#
+#  1. Forward application port by running these commands in the terminal:
+#  kubectl -n kagent-tools port-forward service/kagent-tools 8084:8084 &
+#
+#  2. Then visit http://127.0.0.1:8084/mcp to use MCP
+#
+###############################################################################################
+Pulled: ghcr.io/kagent-dev/tools/helm/kagent-tools:0.3.0
+Digest: sha256:77933dc8a9206e8b9a2e90135aa29a069b26234a50cb046d13f9645f7af0f241
+Release "kagent-executor" has been upgraded. Happy Helming!
+NAME: kagent-executor
+LAST DEPLOYED: Thu Oct  1 23:44:12 2026
+NAMESPACE: kagent-executor
+STATUS: deployed
+REVISION: 3
+DESCRIPTION: Upgrade complete
+TEST SUITE: None
+NOTES:
+################################ To open kagent UI: ###########################################
+#
+#  This is a Helm chart for Kagent Tools
+#
+#  1. Forward application port by running these commands in the terminal:
+#  kubectl -n kagent-executor port-forward service/kagent-executor 8084:8084 &
+#
+#  2. Then visit http://127.0.0.1:8084/mcp to use MCP
+#
+###############################################################################################
+
+==> [dev] kagent
+Pulled: ghcr.io/kagent-dev/kagent/helm/kagent:0.10.1
+Digest: sha256:dc7fc61090725fd9f860d630a0ca66a1bd2a86d15e3fe267c0467c11cb198403
+Release "kagent" has been upgraded. Happy Helming!
+NAME: kagent
+LAST DEPLOYED: Thu Oct  1 23:44:16 2026
+NAMESPACE: kagent
+STATUS: deployed
+REVISION: 3
+DESCRIPTION: Upgrade complete
+TEST SUITE: None
+NOTES:
+################################################################################
+#                            KAGENT DEPLOYED                                  #
+################################################################################
+
+Kagent has been successfully deployed to namespace: kagent
+
+ACCESSING THE UI:
+  1. Forward the UI service port:
+     kubectl -n kagent port-forward service/kagent-ui 8080:8080
+
+  2. Open your browser and visit:
+     http://localhost:8080
+
+ACCESSING THE CONTROLLER API:
+  kubectl -n kagent port-forward service/kagent-controller 8083:8083
+
+  API endpoint: http://localhost:8083/api
+
+DEPLOYED COMPONENTS:
+  - Controller: kagent-controller (manages Kubernetes resources)
+  - Engine: kagent-engine (AI agent runtime)
+  - UI: kagent-ui (web interface)
+
+ENABLED TOOLS:
+
+ENABLED AGENTS:
+
+USEFUL COMMANDS:
+  # View all kagent resources
+  kubectl -n kagent get agents,modelconfigs,toolservers,memories
+
+  # Get agents
+  kubectl -n kagent get agents
+
+  # View logs
+  kubectl -n kagent logs -l app.kubernetes.io/name=kagent -f
+
+TROUBLESHOOTING:
+  - Check pod status: kubectl -n kagent get pods
+  - View events: kubectl -n kagent get events --sort-by='.lastTimestamp'
+  - Controller logs: kubectl -n kagent logs -l app.kubernetes.io/component=controller -f
+DOCUMENTATION:
+  Visit https://kagent.dev for comprehensive documentation and examples.
+################################################################################
+# WARNING: BUNDLED DATABASE IN USE                                             #
+################################################################################
+  The bundled PostgreSQL instance is enabled. It is intended for development and
+  evaluation only, not suitable for production use. Data may be lost if the
+  pod is restarted or rescheduled.
+
+  To use an external database, set:
+    database.postgres.url=<your-connection-string> or database.postgres.urlFile=<path>
+################################################################################
+
+==> [dev] Platform: gateway, routes, policies, RBAC, NetworkPolicies, admission, agent (deploy/dev/platform)
+namespace/sre-sandbox serverside-applied
+clusterrole.rbac.authorization.k8s.io/sre-agent-app-read serverside-applied
+clusterrole.rbac.authorization.k8s.io/sre-agent-app-remediate serverside-applied
+clusterrole.rbac.authorization.k8s.io/sre-agent-cluster-read serverside-applied
+rolebinding.rbac.authorization.k8s.io/sre-agent-read serverside-applied
+rolebinding.rbac.authorization.k8s.io/sre-agent-read serverside-applied
+rolebinding.rbac.authorization.k8s.io/sre-agent-remediate serverside-applied
+clusterrolebinding.rbac.authorization.k8s.io/sre-agent-cluster-read serverside-applied
+configmap/sre-cluster-settings serverside-applied
+secret/agentgateway-placeholder-key serverside-applied
+poddisruptionbudget.policy/kagent-executor serverside-applied
+poddisruptionbudget.policy/kagent-tools serverside-applied
+validatingadmissionpolicy.admissionregistration.k8s.io/sre-agent-governed serverside-applied
+validatingadmissionpolicy.admissionregistration.k8s.io/sre-gateway-not-public serverside-applied
+validatingadmissionpolicy.admissionregistration.k8s.io/sre-mcp-via-gateway serverside-applied
+validatingadmissionpolicy.admissionregistration.k8s.io/sre-modelconfig-via-gateway serverside-applied
+validatingadmissionpolicy.admissionregistration.k8s.io/sre-remediation-restart-only serverside-applied
+validatingadmissionpolicy.admissionregistration.k8s.io/sre-remediation-scale-bounds serverside-applied
+validatingadmissionpolicybinding.admissionregistration.k8s.io/sre-agent-governed serverside-applied
+validatingadmissionpolicybinding.admissionregistration.k8s.io/sre-gateway-not-public serverside-applied
+validatingadmissionpolicybinding.admissionregistration.k8s.io/sre-mcp-via-gateway serverside-applied
+validatingadmissionpolicybinding.admissionregistration.k8s.io/sre-modelconfig-via-gateway serverside-applied
+validatingadmissionpolicybinding.admissionregistration.k8s.io/sre-remediation-restart-only serverside-applied
+validatingadmissionpolicybinding.admissionregistration.k8s.io/sre-remediation-scale-bounds serverside-applied
+agentgatewaybackend.agentgateway.dev/k8s-diagnostics serverside-applied
+agentgatewaybackend.agentgateway.dev/k8s-remediation serverside-applied
+agentgatewaybackend.agentgateway.dev/llm-provider serverside-applied
+agentgatewayparameters.agentgateway.dev/agentgateway-proxy-params serverside-applied
+agentgatewaypolicy.agentgateway.dev/llm-budget serverside-applied
+agentgatewaypolicy.agentgateway.dev/llm-secret-guard serverside-applied
+agentgatewaypolicy.agentgateway.dev/mcp-diagnostics-allowlist serverside-applied
+agentgatewaypolicy.agentgateway.dev/mcp-remediation-allowlist serverside-applied
+agentgatewaypolicy.agentgateway.dev/tracing serverside-applied
+gateway.gateway.networking.k8s.io/agentgateway-proxy serverside-applied
+httproute.gateway.networking.k8s.io/llm serverside-applied
+httproute.gateway.networking.k8s.io/mcp-diagnostics serverside-applied
+httproute.gateway.networking.k8s.io/mcp-remediation serverside-applied
+referencegrant.gateway.networking.k8s.io/allow-agentgateway-tracing serverside-applied
+agent.kagent.dev/sre-triage-agent serverside-applied
+modelconfig.kagent.dev/governed-llm serverside-applied
+remotemcpserver.kagent.dev/k8s-diagnostics serverside-applied
+remotemcpserver.kagent.dev/k8s-remediation serverside-applied
+networkpolicy.networking.k8s.io/default-deny-egress serverside-applied
+networkpolicy.networking.k8s.io/proxy-only-from-kagent serverside-applied
+networkpolicy.networking.k8s.io/default-deny-egress serverside-applied
+networkpolicy.networking.k8s.io/only-from-agentgateway serverside-applied
+networkpolicy.networking.k8s.io/default-deny-egress serverside-applied
+networkpolicy.networking.k8s.io/only-from-agentgateway serverside-applied
+networkpolicy.networking.k8s.io/default-deny-egress serverside-applied
+networkpolicy.networking.k8s.io/only-from-kagent serverside-applied
+networkpolicy.networking.k8s.io/default-deny-egress serverside-applied
+networkpolicy.networking.k8s.io/otlp-from-platform serverside-applied
+
+==> [dev] Sample apps in sre-sandbox (DEMO_APP=true)
+service/frontend created
+deployment.apps/catalog created
+deployment.apps/checkout created
+deployment.apps/frontend created
+deployment.apps/recommender created
+  ✓ agentgateway proxy deployment exists
+Waiting for deployment "agentgateway-proxy" rollout to finish: 0 of 1 updated replicas are available...
+Waiting for deployment spec update to be observed...
+Waiting for deployment "agentgateway-proxy" rollout to finish: 1 out of 2 new replicas have been updated...
+Waiting for deployment "agentgateway-proxy" rollout to finish: 1 out of 2 new replicas have been updated...
+Waiting for deployment "agentgateway-proxy" rollout to finish: 0 of 2 updated replicas are available...
+Waiting for deployment "agentgateway-proxy" rollout to finish: 1 of 2 updated replicas are available...
+deployment "agentgateway-proxy" successfully rolled out
+
+==> [dev] AWS: Bedrock endpoint, IAM role, pod identity (the gateway is the only workload allowed to call the model)
+
+==> [dev] IAM role ac-ws-dev-use2-agentgateway-bedrock (pod-identity) for agentgateway-system/agentgateway-proxy
+  ✓ role created
+  ✓ permissions: bedrock:InvokeModel, InvokeModelWithResponseStream
+
+==> [dev] Bind role to agentgateway-system/agentgateway-proxy
+  ✓ pod identity association created
+
+==> [dev] Restart the proxy to pick up credentials
+Warning: would violate PodSecurity "restricted:latest": seccompProfile (pod or container "agentgateway" must set securityContext.seccompProfile.type to "RuntimeDefault" or "Localhost")
+deployment.apps/agentgateway-proxy restarted
+Waiting for deployment "agentgateway-proxy" rollout to finish: 1 out of 2 new replicas have been updated...
+Waiting for deployment "agentgateway-proxy" rollout to finish: 1 out of 2 new replicas have been updated...
+Waiting for deployment "agentgateway-proxy" rollout to finish: 1 out of 2 new replicas have been updated...
+Waiting for deployment "agentgateway-proxy" rollout to finish: 1 old replicas are pending termination...
+Waiting for deployment "agentgateway-proxy" rollout to finish: 1 old replicas are pending termination...
+deployment "agentgateway-proxy" successfully rolled out
+  ✓ kagent-tools ready
+  ✓ kagent-executor ready
+  ✓ sre-triage-agent Ready
+  ✓ Installed. Next: make verify ENV=dev
+bash-5.3$ 

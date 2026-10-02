@@ -1,0 +1,110 @@
+# Who may talk to the three SRE-agent components inside the cluster.
+# Enforced by the VPC CNI network policy agent (vpc-cni add-on: enableNetworkPolicy "true");
+# scripts/preflight.sh warns if it is off, and scripts/verify.sh proves each rule.
+#
+#   any pod ──✗──▶ kagent (UI, controller, A2A API, agents, database)
+#   any pod ──✗──▶ agentgateway-proxy (LLM + MCP routes)
+#   any pod ──✗──▶ kagent-tools / kagent-executor (MCP servers)
+#   kagent ──────▶ agentgateway-proxy ──────▶ kagent-tools | kagent-executor ──────▶ Kubernetes API
+#
+# kubectl port-forward still works (it enters the pod's network namespace through the
+# kubelet, not over the pod network). These are the INGRESS rules; the default-deny EGRESS rules
+# depend on the VPC and are generated per environment into deploy/<env>/platform/egress.yaml.
+
+# 1. kagent namespace: reachable only from inside the namespace.
+#    With controller.auth.mode=unsecure (port-forward mode), kagent treats every caller as
+#    admin@kagent.dev, so anything that can reach the controller's A2A/HTTP API could run
+#    the agent. This rule makes "anything" = only kagent's own pods.
+#    With KAGENT_OIDC=true, the environment overlay adds oauth2-proxy-ingress.yaml so your
+#    internal load balancer (inside the VPC) can reach oauth2-proxy on 4180.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: only-from-kagent
+  namespace: kagent
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {}
+---
+# 2. agentgateway proxy: reachable only from the kagent namespace (agents and the controller,
+#    which lists tools), from the collector that scrapes its metrics, and from its own namespace
+#    (the agentgateway control plane). The control-plane pods are not selected, so the
+#    API server can still reach any webhook they serve.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: proxy-only-from-kagent
+  namespace: agentgateway-system
+spec:
+  podSelector:
+    matchLabels:
+      gateway.networking.k8s.io/gateway-name: agentgateway-proxy
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kagent
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: sre-observability
+        - podSelector: {}
+---
+# 3. Both tool servers: reachable only from the gateway namespace, so no agent (or anything
+#    else) can call a tool without passing the gateway's allowlists.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: only-from-agentgateway
+  namespace: kagent-tools
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: agentgateway-system
+      ports:
+        - protocol: TCP
+          port: 8084
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: only-from-agentgateway
+  namespace: kagent-executor
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: agentgateway-system
+      ports:
+        - protocol: TCP
+          port: 8084
+---
+# 4. Collector: OTLP only from the platform's own namespaces.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: otlp-from-platform
+  namespace: sre-observability
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values: [kagent, agentgateway-system, kagent-tools, kagent-executor]
+      ports:
+        - { protocol: TCP, port: 4317 }
+        - { protocol: TCP, port: 4318 }

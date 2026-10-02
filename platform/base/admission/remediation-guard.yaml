@@ -1,0 +1,110 @@
+# What the agent's two write tools may actually change, enforced by the API server.
+#
+# The executor needs `patch` for "rollout restart" and the scale subresource for
+# "scale". Kubernetes RBAC cannot say "patch, but only this field", so without these
+# rules the same permission would also allow `rollout undo` / `pause`, an image change,
+# new env vars, a different service account, or scaling to any size.
+#
+# Both policies match ONLY requests made by the executor's ServiceAccount, so people,
+# CI and Argo CD are unaffected. They are the last line of defence behind the gateway
+# allowlist and kagent's human approval.
+
+# 1. Workload updates by the executor: a restart and nothing else.
+#    `kubectl rollout restart` only sets spec.template.metadata.annotations
+#    ["kubectl.kubernetes.io/restartedAt"]. Any other difference is rejected.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: sre-remediation-restart-only
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        operations: ["UPDATE"]
+        resources: ["deployments", "statefulsets", "daemonsets"]
+  matchConditions:
+    - name: only-the-sre-tool-server
+      expression: "request.userInfo.username == 'system:serviceaccount:kagent-executor:kagent-executor'"
+  validations:
+    - expression: >-
+        object.spec.all(f, f == 'template' || (f in oldObject.spec && object.spec[f] == oldObject.spec[f])) &&
+        oldObject.spec.all(f, f == 'template' || f in object.spec)
+      message: "The SRE agent may only restart this workload: replicas, strategy, selector, paused and every other spec field must stay unchanged (use the scale tool to scale)."
+    - expression: "object.spec.template.spec == oldObject.spec.template.spec"
+      message: "The SRE agent may only restart this workload: the pod spec (images, env, resources, service account, security context, volumes...) must stay unchanged."
+    - expression: >-
+        has(object.spec.template.metadata.labels) == has(oldObject.spec.template.metadata.labels) &&
+        (!has(object.spec.template.metadata.labels) ||
+          object.spec.template.metadata.labels == oldObject.spec.template.metadata.labels)
+      message: "The SRE agent may only restart this workload: pod template labels must stay unchanged."
+    - expression: >-
+        (!has(object.spec.template.metadata.annotations) ||
+          object.spec.template.metadata.annotations.all(k, k == 'kubectl.kubernetes.io/restartedAt' ||
+            (has(oldObject.spec.template.metadata.annotations) &&
+             k in oldObject.spec.template.metadata.annotations &&
+             oldObject.spec.template.metadata.annotations[k] == object.spec.template.metadata.annotations[k]))) &&
+        (!has(oldObject.spec.template.metadata.annotations) ||
+          oldObject.spec.template.metadata.annotations.all(k, k == 'kubectl.kubernetes.io/restartedAt' ||
+            (has(object.spec.template.metadata.annotations) && k in object.spec.template.metadata.annotations)))
+      message: "The SRE agent may only restart this workload: the only pod template annotation it may change is kubectl.kubernetes.io/restartedAt."
+    - expression: >-
+        has(object.metadata.labels) == has(oldObject.metadata.labels) &&
+        (!has(object.metadata.labels) || object.metadata.labels == oldObject.metadata.labels)
+      message: "The SRE agent may not change workload labels."
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: sre-remediation-restart-only
+spec:
+  policyName: sre-remediation-restart-only
+  validationActions: [Deny, Audit]
+---
+# 2. Scale by the executor: between 1 and MAX_REPLICAS, and at most double per step.
+#    MAX_REPLICAS comes from the sre-cluster-settings ConfigMap (platform/cluster-settings.env).
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: sre-remediation-scale-bounds
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        operations: ["UPDATE"]
+        resources: ["deployments/scale", "statefulsets/scale"]
+  matchConditions:
+    - name: only-the-sre-tool-server
+      expression: "request.userInfo.username == 'system:serviceaccount:kagent-executor:kagent-executor'"
+  variables:
+    - name: target
+      expression: "has(object.spec.replicas) ? object.spec.replicas : 0"
+    - name: current
+      expression: "has(oldObject.spec.replicas) ? oldObject.spec.replicas : 0"
+    - name: cap
+      expression: "int(params.data.MAX_REPLICAS)"
+  validations:
+    - expression: "variables.target >= 1"
+      message: "The SRE agent may not scale a workload to zero."
+    - expression: "variables.target <= variables.cap"
+      messageExpression: "'The SRE agent may scale to at most ' + string(variables.cap) + ' replicas (requested ' + string(variables.target) + ').'"
+    - expression: "variables.target <= (variables.current < 1 ? 2 : variables.current * 2)"
+      messageExpression: "'The SRE agent may at most double replicas in one step (' + string(variables.current) + ' -> ' + string(variables.target) + ').'"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: sre-remediation-scale-bounds
+spec:
+  policyName: sre-remediation-scale-bounds
+  paramRef:
+    name: sre-cluster-settings
+    namespace: kagent
+    parameterNotFoundAction: Deny
+  validationActions: [Deny, Audit]

@@ -1,0 +1,109 @@
+bash-5.3$ make install ENV=dev
+./scripts/install.sh
+
+==> [dev] Gateway API v1.6.0 CRDs
+customresourcedefinition.apiextensions.k8s.io/backendtlspolicies.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/gatewayclasses.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/gateways.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/grpcroutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/httproutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/listenersets.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/referencegrants.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/tcproutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/tlsroutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/udproutes.gateway.networking.k8s.io serverside-applied
+validatingadmissionpolicy.admissionregistration.k8s.io/safe-upgrades.gateway.networking.k8s.io serverside-applied
+validatingadmissionpolicybinding.admissionregistration.k8s.io/safe-upgrades.gateway.networking.k8s.io serverside-applied
+
+==> [dev] CRDs: agentgateway v1.5.0, kagent 0.10.1
+Release "agentgateway-crds" does not exist. Installing it now.
+Pulled: cr.agentgateway.dev/charts/agentgateway-crds:v1.5.0
+Digest: sha256:3a6cf44559c612ac8afb7f867aace69bbd4cdba765f1def6377b7a3186c603e3
+NAME: agentgateway-crds
+LAST DEPLOYED: Thu Oct  1 23:07:27 2026
+NAMESPACE: agentgateway-system
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+NOTES:
+Thank you for installing the agentgateway-crds chart.
+
+Your release "agentgateway-crds" has been deployed in the "agentgateway-system" namespace.
+
+This chart installs the Custom Resource Definitions (CRDs) required by agentgateway.
+
+To check the installed CRDs:
+
+  kubectl get crds | grep agentgateway.dev
+Release "kagent-crds" does not exist. Installing it now.
+Pulled: ghcr.io/kagent-dev/kagent/helm/kagent-crds:0.10.1
+Digest: sha256:0b8eacbdc85e21ccad6c008e69ef623428db0be8e45c59492b40f3faff6dcf67
+NAME: kagent-crds
+LAST DEPLOYED: Thu Oct  1 23:07:38 2026
+NAMESPACE: kagent
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+NOTES:
+
+
+==> [dev] agentgateway control plane
+Release "agentgateway" does not exist. Installing it now.
+Pulled: cr.agentgateway.dev/charts/agentgateway:v1.5.0
+Digest: sha256:9216ce83965ad2ce0888014d14aac5e71333fd9d4057cd167da92b37630fbee1
+NAME: agentgateway
+LAST DEPLOYED: Thu Oct  1 23:07:46 2026
+NAMESPACE: agentgateway-system
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+NOTES:
+Thank you for installing the agentgateway chart.
+
+Your release "agentgateway" has been deployed in the "agentgateway-system" namespace.
+
+To check the status of the deployment:
+
+  helm status agentgateway --namespace agentgateway-system
+
+To view the resources created by this chart:
+
+  kubectl get all -n agentgateway-system
+
+To learn how to access and use agentgateway, please visit the official documentation:
+
+  https://agentgateway.dev/docs/kubernetes/latest/
+
+To uninstall the agentgateway deployment:
+
+  helm uninstall agentgateway --namespace agentgateway-system
+
+==> [dev] Namespaces with Pod Security labels (enforce baseline, audit + warn restricted)
+Warning: resource namespaces/agentgateway-system is missing the kubectl.kubernetes.io/last-applied-configuration annotation which is required by kubectl apply. kubectl apply should only be used on resources created declaratively by either kubectl create --save-config or kubectl apply. The missing annotation will be patched automatically.
+Warning: resource namespaces/kagent is missing the kubectl.kubernetes.io/last-applied-configuration annotation which is required by kubectl apply. kubectl apply should only be used on resources created declaratively by either kubectl create --save-config or kubectl apply. The missing annotation will be patched automatically.
+
+==> [dev] OpenTelemetry collector
+Release "otel-collector" does not exist. Installing it now.
+NAME: otel-collector
+LAST DEPLOYED: Thu Oct  1 23:08:04 2026
+NAMESPACE: sre-observability
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+NOTES:
+[DEPRECATION] Exporter 'otlphttp' has been renamed to 'otlp_http'. Your config has been automatically rewritten for this release. Please update your values.yaml — auto-rewrite will be removed in a future release. See UPGRADING.md.
+[DEPRECATION] Pipeline 'logs' references renamed processor 'k8sattributes'. It has been automatically rewritten to 'k8s_attributes' for this release. Please update your values.yaml — auto-rewrite will be removed in a future release. See UPGRADING.md.
+[DEPRECATION] Pipeline 'metrics' references renamed processor 'k8sattributes'. It has been automatically rewritten to 'k8s_attributes' for this release. Please update your values.yaml — auto-rewrite will be removed in a future release. See UPGRADING.md.
+[DEPRECATION] Pipeline 'traces' references renamed processor 'k8sattributes'. It has been automatically rewritten to 'k8s_attributes' for this release. Please update your values.yaml — auto-rewrite will be removed in a future release. See UPGRADING.md.
+
+==> [dev] kagent-tools (read-only diagnostics) and kagent-executor (restart/scale)
+Release "kagent-tools" does not exist. Installing it now.
+Pulled: ghcr.io/kagent-dev/tools/helm/kagent-tools:0.3.0
+Digest: sha256:77933dc8a9206e8b9a2e90135aa29a069b26234a50cb046d13f9645f7af0f241
+Error: server-side apply failed for object kagent-tools/kagent-tools apps/v1, Kind=Deployment: failed to create typed patch object (kagent-tools/kagent-tools; apps/v1, Kind=Deployment): .spec.template.spec.containers[name="tools"].ports: duplicate entries for key [containerPort=8084,protocol="TCP"]
+make: *** [install] Error 1
+bash-5.3$ 

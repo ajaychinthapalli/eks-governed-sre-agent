@@ -1,0 +1,17 @@
+# OPTIONAL (recommended for production): use a managed database instead of the
+# bundled demo PostgreSQL - Amazon RDS for PostgreSQL / Aurora PostgreSQL.
+# Turn on with KAGENT_EXTERNAL_DB=true in envs/<env>.env, then make configure ENV=<env>.
+#   kubectl -n kagent create secret generic kagent-db --from-literal=url='postgres://kagent:...@host:5432/kagent?sslmode=require'
+database:
+  postgres:
+    urlFile: /etc/kagent-db/url
+    bundled:
+      enabled: false
+controller:
+  volumes:
+    - name: kagent-db
+      secret: { secretName: kagent-db }
+  volumeMounts:
+    - name: kagent-db
+      mountPath: /etc/kagent-db
+      readOnly: true

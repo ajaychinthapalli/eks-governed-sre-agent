@@ -1,0 +1,14 @@
+# AWS: Amazon Bedrock, signed with SigV4 using the proxy pod's EKS Pod Identity role.
+# No `policies.auth` => default AWS SDK credential chain (Pod Identity or IRSA).
+# region/model are filled from cluster-settings.env by kustomize replacements.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: llm-provider
+  namespace: agentgateway-system
+spec:
+  ai:
+    provider:
+      bedrock:
+        region: SET_BY_SETTINGS
+        model: SET_BY_SETTINGS     # pinned: clients cannot pick a different (pricier) model

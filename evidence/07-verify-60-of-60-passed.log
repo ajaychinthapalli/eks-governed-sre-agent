@@ -1,0 +1,87 @@
+bash-5.3$ make verify ENV=dev
+./scripts/verify.sh
+
+==> [dev] Identity: the gateway reaches Bedrock with its own AWS role (no API key anywhere)
+  ✓ every proxy pod has AWS credentials injected (AWS_CONTAINER_CREDENTIALS_FULL_URI)
+  ✓ chat completion via gateway -> Bedrock returns 200
+
+==> [dev] LLM route: secret guard and budget
+  ✓ prompt containing an AWS access key returns 403
+  ✓ x-ratelimit-limit header returned
+
+==> [dev] MCP routes: 7 diagnostics tools + 2 remediation tools
+      diagnostics: k8s_describe_resource k8s_get_available_api_resources k8s_get_events k8s_get_pod_logs k8s_get_resource_yaml k8s_get_resources k8s_wait 
+      remediation: k8s_rollout k8s_scale 
+  ✓ diagnostics route exposes exactly 7 tools
+  ✓ remediation route exposes exactly k8s_rollout + k8s_scale
+  ✓ no write tool on the diagnostics route
+  ✓ direct tools/call k8s_delete_resource on /mcp/exec is refused
+  ✓ direct tools/call k8s_scale on /mcp/diag is refused
+  ✓ sre-sandbox/frontend still exists
+
+==> [dev] Identity split: what each tool identity can do
+  ✓ reader: can list pods in sre-sandbox
+  ✓ reader: cannot patch deployments
+  ✓ executor: can patch deployments in sre-sandbox
+  ✓ executor: cannot read pod logs
+  ✓ kagent-tools: cannot read Secrets
+  ✓ kagent-tools: cannot delete deployments
+  ✓ kagent-tools: cannot exec into pods
+  ✓ kagent-tools: cannot create RoleBindings
+  ✓ kagent-tools: cannot see kube-system
+  ✓ kagent-executor: cannot read Secrets
+  ✓ kagent-executor: cannot delete deployments
+  ✓ kagent-executor: cannot exec into pods
+  ✓ kagent-executor: cannot create RoleBindings
+  ✓ kagent-executor: cannot see kube-system
+  ✓ read-only namespace radar: reader can list pods
+  ✓ read-only namespace radar: executor cannot patch
+
+==> [dev] Remediation guard: what the executor's patch/scale may change (dry run as system:serviceaccount:kagent-executor:kagent-executor)
+  ✓ rollout restart is allowed
+  ✓ image change is denied
+  ✓ env var injection is denied
+  ✓ rollout pause/resume is denied
+  ✓ replicas via patch is denied
+  ✓ scale to 0 is denied
+  ✓ scale above MAX_REPLICAS (10) is denied
+  ✓ scale 2 -> 3 is allowed
+  ✓ people are not affected (image change as you: allowed)
+
+==> [dev] NetworkPolicies: only the intended callers can connect
+  ✓ a pod in another namespace cannot reach the gateway
+  ✓ a pod in another namespace cannot reach kagent's A2A/API
+  ✓ an agent-side pod cannot bypass the gateway to kagent-tools
+  ✓ an agent-side pod cannot bypass the gateway to kagent-executor
+
+==> [dev] Egress lockdown: platform pods reach only what they need
+  ✓ kagent-tools: the internet is unreachable
+  ✓ kagent-executor: the internet is unreachable
+  ✓ kagent: the internet is unreachable
+  ✓ kagent-tools: the Kubernetes API is reachable
+
+==> [dev] Pod Security labels
+  ✓ agentgateway-system: enforce=baseline, warn=restricted
+  ✓ kagent: enforce=baseline, warn=restricted
+  ✓ kagent-tools: enforce=baseline, warn=restricted
+  ✓ kagent-executor: enforce=baseline, warn=restricted
+  ✓ sre-observability: enforce=baseline, warn=restricted
+
+==> [dev] Admission policies (server-side dry run)
+  ✓ ModelConfig straight to a provider is denied
+  ✓ Agent not using governed-llm is denied
+  ✓ Agent using remediation tools without approval is denied
+  ✓ RemoteMCPServer bypassing the gateway is denied
+  ✓ public LoadBalancer in agentgateway-system is denied
+
+==> [dev] Scaling, retention & observability
+  ✓ proxy HPA present (min 2)
+  ✓ proxy PDB present
+  ✓ tool server PDBs present
+  ✓ proxy Service is ClusterIP
+  ✓ kagent session retention 30 days
+  ✓ OTel collector available
+  ✓ sre-triage-agent Ready
+
+==> [dev] Result: 60 passed, 0 failed, 0 warnings
+bash-5.3$
